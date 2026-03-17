@@ -135,6 +135,7 @@ export interface AppSettings {
   proxyEnabled: boolean;
   selectionModeAdmin: SelectionMode;
   selectionModeUser: SelectionMode;
+  allowedHostsUser?: string[];
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -202,8 +203,16 @@ export interface JobStatus {
 
 export async function getJobStatus(jobId: string): Promise<JobStatus> {
   const base = getBaseUrl();
-  const res = await fetch(`${base}/api/jobs/${encodeURIComponent(jobId)}`);
+  const token = getStoredToken();
+  if (!token) throw new Error("Not authenticated");
+  const res = await fetch(`${base}/api/jobs/${encodeURIComponent(jobId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   if (res.status === 404) throw new Error("Job not found");
+  if (res.status === 401) {
+    handleAuthExpired();
+    throw new Error("Session expired");
+  }
   if (!res.ok) throw new Error("Failed to load job status");
   return res.json();
 }
@@ -211,8 +220,17 @@ export async function getJobStatus(jobId: string): Promise<JobStatus> {
 /** Cancel a running job. The background run will stop and the job will be marked finished. */
 export async function cancelJob(jobId: string): Promise<{ cancelled: boolean }> {
   const base = getBaseUrl();
-  const res = await fetch(`${base}/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+  const token = getStoredToken();
+  if (!token) throw new Error("Not authenticated");
+  const res = await fetch(`${base}/api/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
   if (res.status === 404) throw new Error("Job not found");
+  if (res.status === 401) {
+    handleAuthExpired();
+    throw new Error("Session expired");
+  }
   if (!res.ok) throw new Error("Failed to cancel job");
   return res.json();
 }

@@ -91,8 +91,9 @@ function LoginScreen({ onSuccess }: { onSuccess: () => void }) {
             style={styles.passwordToggle}
             disabled={loading}
             title={showPassword ? "Hide password" : "Show password"}
+            aria-label={showPassword ? "Hide password" : "Show password"}
           >
-            {showPassword ? "Hide" : "Show"}
+            {showPassword ? <EyeOffIcon /> : <EyeIcon />}
           </button>
         </div>
         <button type="submit" style={styles.button} disabled={loading}>
@@ -440,7 +441,6 @@ function MainScreen() {
   const isAdmin = getStoredRole() === "admin";
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [saveLimitStatus, setSaveLimitStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [saveSelectionStatus, setSaveSelectionStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showCredentialsModal, setShowCredentialsModal] = useState(false);
   const [credentialUpdates, setCredentialUpdates] = useState<Record<string, string>>({});
   const [credentialError, setCredentialError] = useState("");
@@ -452,11 +452,25 @@ function MainScreen() {
   const proxyEnabled = settings?.proxyEnabled ?? false;
   const selectionModeAdmin = settings?.selectionModeAdmin ?? "manual";
   const selectionModeUser = settings?.selectionModeUser ?? "manual";
+  const rawAllowedHostsUser = settings?.allowedHostsUser ?? ["immowelt.at"];
+  const allowedHostsUser = Array.from(
+    new Set(
+      rawAllowedHostsUser.map((h) => {
+        const lower = h.toLowerCase().trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+        return lower.startsWith("www.") ? lower.slice(4) : lower;
+      })
+    )
+  );
   const useAutoSelect = isAdmin ? selectionModeAdmin === "auto" : selectionModeUser === "auto";
+  const [settingsTab, setSettingsTab] = useState<"allowedHosts" | "passwords" | "limits">("allowedHosts");
+  const [newHost, setNewHost] = useState("");
+  const [allowedHostsSaving, setAllowedHostsSaving] = useState(false);
+  const [allowedHostsError, setAllowedHostsError] = useState("");
+  const [editRole, setEditRole] = useState<"admin" | "user" | null>(null);
 
   useEffect(() => {
     getSettings()
-      .then(setSettings)
+      .then((s) => setSettings(s))
       .catch(() => {});
   }, []);
 
@@ -541,12 +555,17 @@ function MainScreen() {
                 type="button"
                 onClick={async () => {
                   setShowCredentialsModal(true);
+                  setSettingsTab("allowedHosts");
+                  setAllowedHostsError("");
+                  setNewHost("");
+                  setEditRole(null);
                   setCredentialError("");
                   setCredentialSuccess(false);
                   setCredentialUpdates({});
-                  setCurrentPasswords({});
                   setShowCurrentPassword({});
                   try {
+                    const freshSettings = await getSettings();
+                    setSettings(freshSettings);
                     const { passwords } = await getCredentials();
                     setCurrentPasswords(passwords ?? {});
                   } catch {
@@ -612,200 +631,294 @@ function MainScreen() {
               </button>
             )}
           </div>
-          {isAdmin && (
-            <div style={styles.headerGroup}>
-              <span style={styles.headerGroupLabel}>Max images</span>
-              <input
-                type="number"
-                min={1}
-                max={30}
-                value={maxImagesToSelect}
-                onChange={(e) => {
-                  const n = parseInt(e.target.value, 10);
-                  if (!isNaN(n) && n >= 1 && n <= 30)
-                    setSettings((s) => (s ? { ...s, maxImagesToSelect: n } : { maxImagesToSelect: n, proxyEnabled: false, selectionModeAdmin: "manual", selectionModeUser: "manual" }));
-                }}
-                style={{ ...styles.settingsInput, width: 48, padding: "6px 8px" }}
-              />
-              <button
-                type="button"
-                onClick={async () => {
-                  setSaveLimitStatus("saving");
-                  try {
-                    const next = await updateSettings({ maxImagesToSelect });
-                    setSettings(next);
-                    setSaveLimitStatus("saved");
-                    setTimeout(() => setSaveLimitStatus("idle"), 2000);
-                  } catch (_) {
-                    setSaveLimitStatus("error");
-                    setTimeout(() => setSaveLimitStatus("idle"), 2000);
-                  }
-                }}
-                disabled={saveLimitStatus === "saving"}
-                style={{
-                  ...headerBtnSec,
-                  ...(saveLimitStatus === "saved" ? { background: "#2e7d32", color: "#fff" } : {}),
-                  ...(saveLimitStatus === "error" ? { background: "#c62828", color: "#fff" } : {}),
-                }}
-              >
-                {saveLimitStatus === "saving" ? "…" : saveLimitStatus === "saved" ? "Saved" : saveLimitStatus === "error" ? "Failed" : "Save"}
-              </button>
-            </div>
-          )}
-          {isAdmin && (
-            <div style={styles.headerGroup}>
-              <span style={styles.headerGroupLabel}>Selection</span>
-              <div style={styles.selectionRow}>
-                <span style={styles.selectionWho}>Admin</span>
-                <button
-                  type="button"
-                  style={{
-                    ...headerBtnSec,
-                    ...(selectionModeAdmin === "manual" ? headerBtnActive : {}),
-                  }}
-                  onClick={() => setSettings((s) => (s ? { ...s, selectionModeAdmin: "manual" as SelectionMode } : null))}
-                >
-                  Manual
-                </button>
-                <button
-                  type="button"
-                  style={{
-                    ...headerBtnSec,
-                    ...(selectionModeAdmin === "auto" ? headerBtnActive : {}),
-                  }}
-                  onClick={() => setSettings((s) => (s ? { ...s, selectionModeAdmin: "auto" as SelectionMode } : null))}
-                >
-                  Auto
-                </button>
-              </div>
-              <div style={styles.selectionRow}>
-                <span style={styles.selectionWho}>User</span>
-                <button
-                  type="button"
-                  style={{
-                    ...headerBtnSec,
-                    ...(selectionModeUser === "manual" ? headerBtnActive : {}),
-                  }}
-                  onClick={() => setSettings((s) => (s ? { ...s, selectionModeUser: "manual" as SelectionMode } : null))}
-                >
-                  Manual
-                </button>
-                <button
-                  type="button"
-                  style={{
-                    ...headerBtnSec,
-                    ...(selectionModeUser === "auto" ? headerBtnActive : {}),
-                  }}
-                  onClick={() => setSettings((s) => (s ? { ...s, selectionModeUser: "auto" as SelectionMode } : null))}
-                >
-                  Auto
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={async () => {
-                  setSaveSelectionStatus("saving");
-                  try {
-                    const next = await updateSettings({ selectionModeAdmin, selectionModeUser });
-                    setSettings(next);
-                    setSaveSelectionStatus("saved");
-                    setTimeout(() => setSaveSelectionStatus("idle"), 2000);
-                  } catch (_) {
-                    setSaveSelectionStatus("error");
-                    setTimeout(() => setSaveSelectionStatus("idle"), 2000);
-                  }
-                }}
-                disabled={saveSelectionStatus === "saving"}
-                style={{
-                  ...headerBtnSec,
-                  ...(saveSelectionStatus === "saved" ? { background: "#2e7d32", color: "#fff" } : {}),
-                  ...(saveSelectionStatus === "error" ? { background: "#c62828", color: "#fff" } : {}),
-                }}
-              >
-                {saveSelectionStatus === "saving" ? "…" : saveSelectionStatus === "saved" ? "Saved" : saveSelectionStatus === "error" ? "Failed" : "Save"}
-              </button>
-            </div>
-          )}
+          {/* Admin settings moved into Settings modal */}
         </div>
       </header>
 
       {showCredentialsModal && (
-        <div style={styles.modalOverlay} onClick={() => setShowCredentialsModal(false)} role="dialog" aria-modal="true" aria-label="Passwords">
-          <div style={styles.modalPanel} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalOverlay} onClick={() => setShowCredentialsModal(false)} role="dialog" aria-modal="true" aria-label="Settings">
+          <div style={{ ...styles.modalPanel, maxWidth: 900 }} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHeader}>
-              <h2 style={styles.modalTitle}>Passwords</h2>
-              <button type="button" onClick={() => setShowCredentialsModal(false)} style={styles.modalCloseBtn} aria-label="Close">
-                ×
-              </button>
+              <h2 style={styles.modalTitle}>Settings</h2>
             </div>
-            {credentialError && <p style={styles.credentialError}>{credentialError}</p>}
-            {credentialSuccess && <p style={styles.credentialSuccess}>Saved. Changes are persistent.</p>}
-            <div style={styles.credentialSection}>
-              <span style={styles.credentialSectionLabel}>Current password (used to login)</span>
-              {["admin", "user"].map((role) => (
-                <div key={`current-${role}`} style={styles.credentialRow}>
-                  <span style={styles.credentialRoleName}>{role}</span>
-                  <span style={styles.credentialCurrentValue}>
-                    {showCurrentPassword[role] ? (currentPasswords[role] ?? "—") : "••••••••"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowCurrentPassword((s) => ({ ...s, [role]: !s[role] }))}
-                    style={styles.passwordToggle}
-                    title={showCurrentPassword[role] ? "Hide password" : "Show password"}
-                  >
-                    {showCurrentPassword[role] ? "Hide" : "Show"}
-                  </button>
-                </div>
-              ))}
+            <div style={styles.settingsModalBody}>
+              <div style={styles.settingsTabs}>
+                <button type="button" style={{ ...styles.settingsTabBtn, ...(settingsTab === "allowedHosts" ? styles.settingsTabBtnActive : {}) }} onClick={() => setSettingsTab("allowedHosts")}>
+                  Allowed hosts
+                </button>
+                <button type="button" style={{ ...styles.settingsTabBtn, ...(settingsTab === "passwords" ? styles.settingsTabBtnActive : {}) }} onClick={() => setSettingsTab("passwords")}>
+                  Passwords
+                </button>
+                <button type="button" style={{ ...styles.settingsTabBtn, ...(settingsTab === "limits" ? styles.settingsTabBtnActive : {}) }} onClick={() => setSettingsTab("limits")}>
+                  Max images & Selection
+                </button>
+              </div>
+
+              <div style={styles.settingsPanel}>
+                {settingsTab === "allowedHosts" && (
+                  <>
+                    <div style={styles.settingsPanelTitle}>Allowed hosts (users)</div>
+                    <div style={styles.settingsPanelDesc}>Users can only process URLs from these hosts. Admins can process any host. Changes are saved automatically.</div>
+                    {allowedHostsError && <p style={styles.credentialError}>{allowedHostsError}</p>}
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+                      <input value={newHost} onChange={(e) => setNewHost(e.target.value)} placeholder="e.g. www.immowelt.de" style={styles.credentialInput} spellCheck={false} />
+                      <button
+                        type="button"
+                        style={styles.headerBtn}
+                        disabled={allowedHostsSaving}
+                        onClick={async () => {
+                          const host = newHost.trim().toLowerCase();
+                          if (!host) return;
+                          const normalized = host.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+                          const nextList = Array.from(new Set([...allowedHostsUser, normalized])).filter(Boolean);
+                          setAllowedHostsSaving(true);
+                          setAllowedHostsError("");
+                          try {
+                            const next = await updateSettings({ allowedHostsUser: nextList } as any);
+                            setSettings(next);
+                            setNewHost("");
+                          } catch (e) {
+                            setAllowedHostsError(e instanceof Error ? e.message : "Failed to save");
+                          } finally {
+                            setAllowedHostsSaving(false);
+                          }
+                        }}
+                      >
+                        Add
+                      </button>
+                    </div>
+                    <div style={styles.hostList}>
+                      {allowedHostsUser.map((h) => (
+                        <div key={h} style={styles.hostRow}>
+                          <span style={styles.hostValue}>{h}</span>
+                          <button
+                            type="button"
+                            style={styles.iconBtn}
+                            aria-label={`Remove ${h}`}
+                            title={`Remove ${h}`}
+                            onClick={async () => {
+                              const nextList = allowedHostsUser.filter((x) => x !== h);
+                              setAllowedHostsSaving(true);
+                              setAllowedHostsError("");
+                              try {
+                                const next = await updateSettings({ allowedHostsUser: nextList } as any);
+                                setSettings(next);
+                              } catch (e) {
+                                setAllowedHostsError(e instanceof Error ? e.message : "Failed to save");
+                              } finally {
+                                setAllowedHostsSaving(false);
+                              }
+                            }}
+                          >
+                            <XIcon />
+                          </button>
+                        </div>
+                      ))}
+                      {allowedHostsUser.length === 0 && <div style={styles.settingsPanelDesc}>No hosts configured.</div>}
+                    </div>
+                  </>
+                )}
+
+                {settingsTab === "passwords" && (
+                  <>
+                    <div style={styles.settingsPanelTitle}>Passwords</div>
+                    <div style={styles.settingsPanelDesc}>View and update the shared admin/user passwords. Changes are saved automatically.</div>
+                    {credentialError && <p style={styles.credentialError}>{credentialError}</p>}
+                    {credentialSuccess && <p style={styles.credentialSuccess}>Saved. Changes are persistent.</p>}
+
+                    <div style={styles.hostList}>
+                      {(["admin", "user"] as const).map((role) => {
+                        const isEditing = editRole === role;
+                        const inputValue = credentialUpdates[role] ?? "";
+                        return (
+                          <div key={role} style={styles.hostRow}>
+                            <span style={styles.hostValue}>{role}</span>
+                            {isEditing ? (
+                              <>
+                                <input
+                                  type="text"
+                                  placeholder={showCurrentPassword[role] ? currentPasswords[role] ?? "" : "New password"}
+                                  value={inputValue}
+                                  onChange={(e) => setCredentialUpdates((u) => ({ ...u, [role]: e.target.value }))}
+                                  style={{ ...styles.credentialInput, flex: 1, fontFamily: "monospace" }}
+                                  autoComplete="new-password"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={credentialSaving}
+                                  style={styles.headerBtn}
+                                  onClick={async () => {
+                                    const v = (credentialUpdates[role] ?? "").trim();
+                                    if (!v || v === (currentPasswords[role] ?? "")) {
+                                      setEditRole(null);
+                                      return;
+                                    }
+                                    setCredentialSaving(true);
+                                    setCredentialError("");
+                                    setCredentialSuccess(false);
+                                    try {
+                                      await updateCredentials({ updates: { [role]: v } });
+                                      setCredentialUpdates((u) => ({ ...u, [role]: "" }));
+                                      setCredentialSuccess(true);
+                                      setTimeout(() => setCredentialSuccess(false), 3000);
+                                      setEditRole(null);
+                                      try {
+                                        const { passwords } = await getCredentials();
+                                        setCurrentPasswords(passwords ?? {});
+                                      } catch {
+                                        // ignore
+                                      }
+                                    } catch (err) {
+                                      setCredentialError(err instanceof Error ? err.message : "Failed to save");
+                                    } finally {
+                                      setCredentialSaving(false);
+                                    }
+                                  }}
+                                >
+                                  Save
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <span style={{ flex: 1, fontFamily: "monospace" }}>{showCurrentPassword[role] ? (currentPasswords[role] ?? "—") : "••••••••"}</span>
+                            <button
+                              type="button"
+                              onClick={() => setShowCurrentPassword((s) => ({ ...s, [role]: !s[role] }))}
+                              style={styles.iconBtn}
+                              title={showCurrentPassword[role] ? "Hide password" : "Show password"}
+                              aria-label={showCurrentPassword[role] ? "Hide password" : "Show password"}
+                            >
+                                  {showCurrentPassword[role] ? <EyeOffIcon /> : <EyeIcon />}
+                                </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditRole((r) => (r === role ? null : role));
+                                setCredentialUpdates((u) => ({ ...u, [role]: currentPasswords[role] ?? "" }));
+                              }}
+                              style={styles.iconBtn}
+                              title={isEditing ? "Stop editing" : "Edit"}
+                              aria-label={isEditing ? "Stop editing" : "Edit"}
+                            >
+                                  <PenIcon />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {settingsTab === "limits" && (
+                  <>
+                    <div style={styles.settingsPanelTitle}>Max images & Selection</div>
+                    <div style={styles.settingsPanelDesc}>These settings affect how many images can be selected and how selection behaves.</div>
+
+                    <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10 }}>
+                      <span style={{ width: 160, color: "#444", fontSize: 13 }}>Max images to select</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={maxImagesToSelect}
+                        onChange={async (e) => {
+                          const n = parseInt(e.target.value, 10);
+                          if (!isNaN(n) && n >= 1 && n <= 30) {
+                            setSettings((s) => (s ? { ...s, maxImagesToSelect: n } : null));
+                            try {
+                              const next = await updateSettings({ maxImagesToSelect: n });
+                              setSettings(next);
+                            } catch {
+                              // ignore
+                            }
+                          }
+                        }}
+                        style={{ ...styles.settingsInput, width: 72 }}
+                      />
+                    </div>
+
+                    <div style={{ marginTop: 18 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Selection mode</div>
+                      <div style={{ ...styles.selectionRow, flexWrap: "wrap", rowGap: 8 }}>
+                        <span style={styles.selectionWho}>Admin</span>
+                        <button
+                          type="button"
+                          style={{ ...headerBtnSec, ...(selectionModeAdmin === "manual" ? headerBtnActive : {}) }}
+                          onClick={async () => {
+                            setSettings((s) => (s ? { ...s, selectionModeAdmin: "manual" as SelectionMode } : null));
+                            try {
+                              const next = await updateSettings({ selectionModeAdmin: "manual" as SelectionMode });
+                              setSettings(next);
+                            } catch {
+                              // ignore
+                            }
+                          }}
+                        >
+                          Manual
+                        </button>
+                        <button
+                          type="button"
+                          style={{ ...headerBtnSec, ...(selectionModeAdmin === "auto" ? headerBtnActive : {}) }}
+                          onClick={async () => {
+                            setSettings((s) => (s ? { ...s, selectionModeAdmin: "auto" as SelectionMode } : null));
+                            try {
+                              const next = await updateSettings({ selectionModeAdmin: "auto" as SelectionMode });
+                              setSettings(next);
+                            } catch {
+                              // ignore
+                            }
+                          }}
+                        >
+                          Auto
+                        </button>
+                        <span style={{ ...styles.selectionWho, marginLeft: 24 }}>User</span>
+                        <button
+                          type="button"
+                          style={{ ...headerBtnSec, ...(selectionModeUser === "manual" ? headerBtnActive : {}) }}
+                          onClick={async () => {
+                            setSettings((s) => (s ? { ...s, selectionModeUser: "manual" as SelectionMode } : null));
+                            try {
+                              const next = await updateSettings({ selectionModeUser: "manual" as SelectionMode });
+                              setSettings(next);
+                            } catch {
+                              // ignore
+                            }
+                          }}
+                        >
+                          Manual
+                        </button>
+                        <button
+                          type="button"
+                          style={{ ...headerBtnSec, ...(selectionModeUser === "auto" ? headerBtnActive : {}) }}
+                          onClick={async () => {
+                            setSettings((s) => (s ? { ...s, selectionModeUser: "auto" as SelectionMode } : null));
+                            try {
+                              const next = await updateSettings({ selectionModeUser: "auto" as SelectionMode });
+                              setSettings(next);
+                            } catch {
+                              // ignore
+                            }
+                          }}
+                        >
+                          Auto
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-            <div style={styles.credentialSection}>
-              <span style={styles.credentialSectionLabel}>Change password (leave blank to keep)</span>
-              {["admin", "user"].map((role) => (
-                <div key={`new-${role}`} style={styles.credentialRow}>
-                  <span style={styles.credentialRoleName}>{role}</span>
-                  <input
-                    type="password"
-                    placeholder="New password"
-                    value={credentialUpdates[role] ?? ""}
-                    onChange={(e) => setCredentialUpdates((u) => ({ ...u, [role]: e.target.value }))}
-                    style={styles.credentialInput}
-                    autoComplete="new-password"
-                  />
-                </div>
-              ))}
-            </div>
-            <div style={styles.modalActions}>
+
+            <div style={{ ...styles.modalActions, justifyContent: "flex-end", gap: 8 }}>
               <button
                 type="button"
-                onClick={async () => {
-                  setCredentialError("");
-                  setCredentialSuccess(false);
-                  const updates: Record<string, string> = {};
-                  if (credentialUpdates.admin?.trim()) updates.admin = credentialUpdates.admin.trim();
-                  if (credentialUpdates.user?.trim()) updates.user = credentialUpdates.user.trim();
-                  if (Object.keys(updates).length === 0) {
-                    setShowCredentialsModal(false);
-                    return;
-                  }
-                  setCredentialSaving(true);
-                  try {
-                    await updateCredentials({ updates });
-                    setCredentialUpdates({});
-                    setCredentialSuccess(true);
-                    setTimeout(() => setCredentialSuccess(false), 3000);
-                  } catch (err) {
-                    setCredentialError(err instanceof Error ? err.message : "Failed to save");
-                  } finally {
-                    setCredentialSaving(false);
-                  }
+                onClick={() => {
+                  setShowCredentialsModal(false);
                 }}
-                disabled={credentialSaving}
-                style={styles.headerBtn}
+                style={headerBtnSec}
               >
-                {credentialSaving ? "Saving…" : "Save"}
-              </button>
-              <button type="button" onClick={() => setShowCredentialsModal(false)} style={headerBtnSec}>
                 Close
               </button>
             </div>
@@ -1112,8 +1225,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     background: "#fff",
     color: "#333",
-    border: "2px solid transparent",
-    borderColor: "transparent",
+    border: "1px solid #d0d0d0",
+    borderColor: "#d0d0d0",
     borderRadius: 6,
     cursor: "pointer",
     boxShadow: "none",
@@ -1208,7 +1321,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     background: "#fff",
     color: "#333",
-    border: "2px solid transparent",
+    borderWidth: 2,
+    borderStyle: "solid",
     borderColor: "transparent",
     borderRadius: 6,
     cursor: "pointer",
@@ -1243,14 +1357,16 @@ const styles: Record<string, React.CSSProperties> = {
     minWidth: 0,
   },
   passwordToggle: {
-    padding: "12px 14px",
-    fontSize: 14,
+    width: 44,
     background: "#e0e0e0",
     color: "#333",
     border: "1px solid #ccc",
     borderLeft: "none",
     borderRadius: "0 6px 6px 0",
     cursor: "pointer",
+    display: "grid",
+    placeItems: "center",
+    padding: 0,
   },
   textarea: {
     padding: 12,
@@ -1376,7 +1492,9 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 32,
   },
   resultCard: {
-    border: "2px solid",
+    borderWidth: 2,
+    borderStyle: "solid",
+    borderColor: "#ddd",
     borderRadius: 12,
     padding: 20,
     marginBottom: 20,
@@ -1443,7 +1561,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   selectionThumb: {
     padding: 0,
-    border: "3px solid transparent",
+    borderWidth: 3,
+    borderStyle: "solid",
+    borderColor: "transparent",
     borderRadius: 8,
     cursor: "pointer",
     background: "#eee",
@@ -1667,6 +1787,85 @@ const styles: Record<string, React.CSSProperties> = {
     paddingTop: 16,
     borderTop: "1px solid #eee",
   },
+  settingsModalBody: {
+    display: "flex",
+    gap: 14,
+    marginTop: 12,
+  },
+  settingsTabs: {
+    width: 200,
+    borderRight: "1px solid #e6e6e6",
+    paddingRight: 12,
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  settingsTabBtn: {
+    textAlign: "left",
+    padding: "10px 10px",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "#e0e0e0",
+    background: "#fff",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#333",
+  },
+  settingsTabBtnActive: {
+    background: "#1976d2",
+    borderColor: "#1976d2",
+    color: "#fff",
+  },
+  settingsPanel: {
+    flex: 1,
+    minWidth: 0,
+    paddingLeft: 4,
+  },
+  settingsPanelTitle: {
+    fontSize: 16,
+    fontWeight: 800,
+    marginBottom: 6,
+  },
+  settingsPanelDesc: {
+    fontSize: 13,
+    color: "#555",
+    marginBottom: 12,
+    lineHeight: 1.35,
+  },
+  hostList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  hostRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "10px 10px",
+    border: "1px solid #eee",
+    borderRadius: 10,
+    background: "#fff",
+  },
+  hostValue: {
+    width: 160,
+    fontWeight: 800,
+    fontSize: 13,
+    color: "#333",
+    wordBreak: "break-all",
+  },
+  iconBtn: {
+    width: 36,
+    height: 32,
+    border: "1px solid #ddd",
+    borderRadius: 8,
+    background: "#fff",
+    cursor: "pointer",
+    display: "grid",
+    placeItems: "center",
+    padding: 0,
+  },
   credentialError: {
     margin: "0 0 12px",
     color: "#c62828",
@@ -1728,6 +1927,50 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#666",
   },
 };
+
+function EyeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M12 5c5.5 0 9.5 4.1 10.9 6.1.2.3.2.7 0 1C21.5 14 17.5 18 12 18S2.5 14 1.1 12.1c-.2-.3-.2-.7 0-1C2.5 9.1 6.5 5 12 5Zm0 2C7.9 7 4.6 10 3.2 11.6 4.6 13.2 7.9 16 12 16s7.4-2.8 8.8-4.4C19.4 10 16.1 7 12 7Zm0 1.5A3.5 3.5 0 1 1 12 15a3.5 3.5 0 0 1 0-7Zm0 2A1.5 1.5 0 1 0 12 13a1.5 1.5 0 0 0 0-3Z"
+      />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M4.3 3 3 4.3l3 3C3.2 8.9 1.6 10.8 1.1 11.6c-.2.3-.2.7 0 1C2.5 14.5 6.5 18.5 12 18.5c1.7 0 3.2-.4 4.6-1l3.1 3.1L21 19.3 4.3 3ZM8 9.3l1.6 1.6a2.6 2.6 0 0 0-.1.6A2.5 2.5 0 0 0 12 14c.2 0 .4 0 .6-.1l1.6 1.6c-.7.3-1.4.5-2.2.5-2.5 0-4.6-1.7-5.9-3.4.7-.9 1.9-2.2 3.5-3.3Zm4.6 1.1 2.7 2.7a2.5 2.5 0 0 0-2.7-2.7Zm-.6-4.4c5.5 0 9.5 4.1 10.9 6.1.2.3.2.7 0 1-.7 1-2.2 2.8-4.5 4.2l-1.5-1.5c1.7-1 3-2.3 3.6-3.1C19.4 10.9 16.1 8 12 8c-.7 0-1.4.1-2 .3L8.6 6.9c1-.4 2.1-.6 3.4-.6Z"
+      />
+    </svg>
+  );
+}
+
+function PenIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M3 17.3V21h3.7l10.9-10.9-3.7-3.7L3 17.3Zm2.2 2.5v-1.6l8.5-8.5 1.6 1.6-8.5 8.5H5.2ZM20.7 7.1c.4-.4.4-1 0-1.4l-2.4-2.4c-.4-.4-1-.4-1.4 0l-1.9 1.9 3.7 3.7 2-1.8Z"
+      />
+    </svg>
+  );
+}
+
+function XIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M18.3 5.7a1 1 0 0 0-1.4 0L12 10.6 7.1 5.7A1 1 0 0 0 5.7 7.1l4.9 4.9-4.9 4.9a1 1 0 1 0 1.4 1.4l4.9-4.9 4.9 4.9a1 1 0 0 0 1.4-1.4L13.4 12l4.9-4.9a1 1 0 0 0 0-1.4Z"
+      />
+    </svg>
+  );
+}
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(false);

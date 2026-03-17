@@ -54,7 +54,7 @@ export function loginHandler(req: Request, res: Response): void {
   const credentials = getCredentials();
   let role: AuthRole | null = null;
   for (const [r, p] of Object.entries(credentials)) {
-    if (password && p === password) {
+    if (password && p === password && (r === "admin" || r === "user")) {
       role = r;
       break;
     }

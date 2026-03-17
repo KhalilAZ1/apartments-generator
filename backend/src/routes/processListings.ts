@@ -16,6 +16,8 @@ import { getConfig } from "../config/env";
 import { v4 as uuidv4 } from "uuid";
 import { getProxyForSession, markScraperApiCreditsExhausted } from "../proxy-config";
 import { ensurePortrait916 } from "../image/format";
+import { getSettings } from "../settings";
+import type { AuthRole } from "../auth";
 
 export { getProxyForSession };
 
@@ -379,6 +381,33 @@ export async function processListingsHandler(req: Request, res: Response): Promi
   if (trimmed.length === 0) {
     res.status(400).json({ error: "No valid URLs provided" });
     return;
+  }
+
+  // Host allowlist for non-admin users: only specific domains are permitted.
+  const role = (req as Request & { authRole?: AuthRole }).authRole ?? "user";
+  if (role !== "admin") {
+    const { allowedHostsUser } = getSettings();
+    const allowedSet = new Set(allowedHostsUser.map((h) => h.toLowerCase()));
+    const invalid = new Set<string>();
+    for (const u of trimmed) {
+      try {
+        const parsed = new URL(u);
+        const host = parsed.hostname.toLowerCase();
+        if (!allowedSet.has(host)) invalid.add(host);
+      } catch {
+        // ignore parse errors here; they'll be rejected later by scraper if needed
+      }
+    }
+    if (invalid.size > 0) {
+      const allowedBases = Array.from(allowedSet).map((h) => (h.startsWith("www.") ? h.slice(4) : h));
+      const uniqueBases = Array.from(new Set(allowedBases));
+      const allowedList = uniqueBases.join(", ");
+      res.status(400).json({
+        error: `Use only these hosts: ${allowedList}`,
+        invalidHosts: Array.from(invalid),
+      });
+      return;
+    }
   }
   // Same default as frontend (App.tsx DEFAULT_PROMPT) so unedited prompt is sent to Gemini as-is.
   const DEFAULT_PROMPT = `Edit this photo realistically. Keep the exact same room, same layout, same lighting conditions, and same overall atmosphere. Shift the camera angle to give a fresh perspective of the same space — for example a few degrees to the left or right, or slightly higher or lower viewpoint. Replace some decorative elements such as furniture, wall art, picture frames, throw pillows, vases, candles, small plants. All new decor should feel realistic, cozy, and consistent with the style and color palette already in the room. Do not add or remove rooms or architectural elements. Keep the same natural or artificial lighting as in the reference photo. The result should look like a real interior photograph taken by a real estate photographer or Airbnb host in Germany, not a render or illustration. Photorealistic, high quality, sharp, no people, no text, no watermarks.

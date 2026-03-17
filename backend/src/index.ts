@@ -13,6 +13,7 @@ import cors from "cors";
 import { loadEnv, getConfig } from "./config/env";
 import { loginHandler, authMiddleware, adminOnlyMiddleware, revokeToken } from "./auth";
 import { processListingsHandler, processSelectedHandler } from "./routes/processListings";
+import { rateLimit } from "./middleware/rateLimit";
 import { getSettings, updateSettings } from "./settings";
 import { getCredentials as getCredentialsData, getRoleNames, updateCredentials } from "./credentials";
 import { closeSession } from "./scraper-session";
@@ -31,8 +32,45 @@ setInterval(cleanupOldScreenshots, 30 * 60 * 1000);
 setInterval(cleanupOldGenerated, 30 * 60 * 1000);
 
 const app = express();
-app.use(cors());
+app.set("trust proxy", 1);
+
+const allowOrigin = (origin: string | undefined): boolean => {
+  if (!origin) return true; // same-origin / server-side
+  const o = origin.toLowerCase();
+  // Local dev + same-machine access
+  if (o.startsWith("http://localhost:5173")) return true;
+  if (o.startsWith("http://127.0.0.1:5173")) return true;
+  // Optional: allow configured frontend origin(s)
+  const configured = process.env.FRONTEND_ORIGIN;
+  if (configured) {
+    return configured
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+      .some((x) => x === o);
+  }
+  return true;
+};
+
+app.use(
+  cors({
+    origin(origin, cb) {
+      if (allowOrigin(origin)) return cb(null, true);
+      return cb(new Error("CORS blocked"));
+    },
+  })
+);
 app.use(express.json({ limit: "1mb" }));
+
+// Basic security headers
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  // Keep it simple; Playwright scraping is server-side so CSP mainly affects our own frontend.
+  res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+  next();
+});
 
 // Health check
 app.get("/health", (_req, res) => {
@@ -40,7 +78,7 @@ app.get("/health", (_req, res) => {
 });
 
 // Login (no auth)
-app.post("/api/login", loginHandler);
+app.post("/api/login", rateLimit({ windowMs: 60_000, max: 20, keyPrefix: "login" }), loginHandler);
 
 // Logout: revoke token, close scraper session, delete screenshots + generated images (protected).
 app.post("/api/logout", authMiddleware, async (req, res) => {
@@ -73,18 +111,29 @@ app.get("/api/proxy/status", authMiddleware, (_req, res) => {
 });
 
 // Protected API
-app.post("/api/process-listings", authMiddleware, processListingsHandler);
+app.post(
+  "/api/process-listings",
+  authMiddleware,
+  rateLimit({ windowMs: 60_000, max: 10, keyPrefix: "process-listings" }),
+  processListingsHandler
+);
 
 // Settings (persistent). GET: any authenticated user. POST: admin only.
 app.get("/api/settings", authMiddleware, (_req, res) => {
   res.json(getSettings());
 });
 app.post("/api/settings", authMiddleware, adminOnlyMiddleware, (req, res) => {
-  const body = req.body as { maxImagesToSelect?: number; selectionModeAdmin?: string; selectionModeUser?: string };
+  const body = req.body as {
+    maxImagesToSelect?: number;
+    selectionModeAdmin?: string;
+    selectionModeUser?: string;
+    allowedHostsUser?: unknown;
+  };
   const update: Parameters<typeof updateSettings>[0] = {};
   if (typeof body.maxImagesToSelect === "number") update.maxImagesToSelect = body.maxImagesToSelect;
   if (body.selectionModeAdmin === "manual" || body.selectionModeAdmin === "auto") update.selectionModeAdmin = body.selectionModeAdmin;
   if (body.selectionModeUser === "manual" || body.selectionModeUser === "auto") update.selectionModeUser = body.selectionModeUser;
+  if (Array.isArray(body.allowedHostsUser)) update.allowedHostsUser = body.allowedHostsUser as any;
   const next = updateSettings(update);
   res.json(next);
 });
@@ -115,7 +164,7 @@ app.post(
 );
 
 // Job status (no auth; jobId is UUID)
-app.get("/api/jobs/:jobId", (req, res) => {
+app.get("/api/jobs/:jobId", authMiddleware, (req, res) => {
   const job = getJob(req.params.jobId);
   if (!job) {
     res.status(404).json({ error: "Job not found" });
@@ -125,7 +174,7 @@ app.get("/api/jobs/:jobId", (req, res) => {
 });
 
 // Cancel a running job (no auth; jobId is UUID)
-app.post("/api/jobs/:jobId/cancel", (req, res) => {
+app.post("/api/jobs/:jobId/cancel", authMiddleware, (req, res) => {
   const jobId = req.params.jobId;
   const job = getJob(jobId);
   if (!job) {
