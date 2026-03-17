@@ -1,0 +1,14 @@
+node_modules/
+.env
+*.log
+backend/dist/
+backend/.screenshots/
+backend/.generated/
+backend/.scraperapi_no_credits
+backend/.credentials.json
+backend/.settings.json
+frontend/build/
+credentials/
+.idea/
+.vscode/
+*.tsbuildinfo

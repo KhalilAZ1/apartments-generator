@@ -1,0 +1,30 @@
+# Dependencies and build outputs (rebuilt in image)
+node_modules
+backend/node_modules
+frontend/node_modules
+backend/dist
+frontend/build
+
+# Git and IDE
+.git
+.gitignore
+.idea
+.vscode
+*.md
+!DEPLOYMENT.md
+
+# Env and secrets (pass at runtime via docker-compose env_file)
+.env
+.env.*
+*.pem
+
+# Local data (mount as volumes if you need to persist)
+backend/.credentials.json
+backend/.settings.json
+backend/.screenshots
+backend/.generated
+backend/.scraperapi_no_credits
+
+# Logs and temp
+*.log
+.DS_Store

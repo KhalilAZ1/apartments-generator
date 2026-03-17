@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Listing Image Processor</title>
+    <style>
+      .selection-thumb:focus,
+      .selection-thumb:focus-visible {
+        outline: none !important;
+      }
+
+      /* Prevent default browser focus rings (often black) on click */
+      button:focus,
+      button:focus-visible,
+      [role="button"]:focus,
+      [role="button"]:focus-visible,
+      input:focus,
+      input:focus-visible,
+      select:focus,
+      select:focus-visible,
+      textarea:focus,
+      textarea:focus-visible {
+        outline: none !important;
+        box-shadow: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

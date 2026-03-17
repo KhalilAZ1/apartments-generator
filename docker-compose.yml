@@ -1,0 +1,30 @@
+# Apartments Generator – run on Hostinger VPS or any host with Docker
+# Usage: docker compose up -d --build
+# This creates a separate Docker project named "apartments-generator".
+
+name: apartments-generator
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # Optional: if API is on another host, set when building:
+      # args:
+      #   VITE_API_URL: https://yourdomain.com
+    container_name: apartments-generator
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    # Optional: persist credentials & settings (create backend-data on host first)
+    # volumes:
+    #   - ./backend-data:/app/backend-data
+    # Then set in .env: BACKEND_DATA_DIR=/app/backend-data (requires app support)
+    # Optional: Google Drive service account JSON
+    # volumes:
+    #   - ./credentials/drive-service-account.json:/app/backend/credentials/drive-service-account.json:ro
