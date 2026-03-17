@@ -16,15 +16,82 @@ Use this if you run the app via **Docker** or **Hostinger Docker Manager**.
 
 1. SSH into the VPS (or open **Terminal** in Hostinger).
 2. Install Git if needed: `apt update && apt install -y git`
-3. Create the folder and clone (replace `YOUR_REPO_URL` with your actual URL, e.g. `https://github.com/youruser/your-repo.git`):
+3. Create the folder and clone (replace with your repo URL if different):
 
 ```bash
 mkdir -p /root/apartments-generator
 cd /root/apartments-generator
-git clone YOUR_REPO_URL .
+git clone https://github.com/KhalilAZ1/apartments-generator.git .
 ```
 
 Or use `/var/www/apartments-generator` if you prefer to keep web apps in `/var/www`. The project is now in that folder. Do **not** commit `.env` to Git; create it on the server (see below).
+
+### Hostinger VPS – steps right after clone
+
+Once the repo is cloned, do the following **on the VPS** in the project folder (e.g. `/root/apartments-generator`):
+
+**1. Create `.env`** in the same folder as `docker-compose.yml`:
+
+```bash
+nano .env
+```
+
+Paste and edit (use either **Drive service account** or **OAuth**; for Docker, use `PORT=3001`):
+
+```env
+# Required
+GEMINI_API_KEY=your_gemini_api_key
+GOOGLE_DRIVE_ROOT_FOLDER_ID=your_drive_folder_id
+
+# Drive – Option A: service account (path inside container; mount JSON via docker-compose volume)
+# GOOGLE_DRIVE_CREDENTIALS_PATH=/app/backend/credentials/drive-service-account.json
+
+# Drive – Option B: OAuth
+GOOGLE_DRIVE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_DRIVE_CLIENT_SECRET=your-client-secret
+GOOGLE_DRIVE_REFRESH_TOKEN=your-refresh-token
+
+# Docker app port (must match docker-compose ports)
+PORT=3001
+NODE_ENV=production
+
+# Optional: proxy for scraping
+# SCRAPING_PROXY_API_KEY=
+# SCRAPING_PROXY_URL=
+```
+
+Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X`).
+
+**2. (Optional) Service account:** If you use a **Google Drive service account** JSON file, put it in a folder on the VPS (e.g. `./credentials/drive-service-account.json`), then in `docker-compose.yml` uncomment the credentials volume:
+
+```yaml
+volumes:
+  - ./credentials/drive-service-account.json:/app/backend/credentials/drive-service-account.json:ro
+```
+
+And in `.env` set:
+
+```env
+GOOGLE_DRIVE_CREDENTIALS_PATH=/app/backend/credentials/drive-service-account.json
+```
+
+(Leave the OAuth variables empty or commented.)
+
+**3. Install Docker** (if not already installed, e.g. fresh VPS):
+
+```bash
+apt update && apt install -y docker.io docker-compose-v2
+# or: snap install docker
+```
+
+**4. Build and run:**
+
+```bash
+cd /root/apartments-generator   # or your path
+docker compose up -d --build
+```
+
+**5. Check:** The app listens on **port 3001**. Open `http://YOUR_VPS_IP:3001` in a browser, or in Hostinger Docker Manager use “Open” for the **apartments-generator** project. For HTTPS, put Nginx in front and `proxy_pass http://127.0.0.1:3001` (see Option B, section 6).
 
 **Option 2 – Upload with SFTP or File Manager**
 

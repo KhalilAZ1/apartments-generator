@@ -5,7 +5,7 @@
 FROM node:20-bookworm-slim AS frontend
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm ci --omit=dev 2>/dev/null || npm install
+RUN npm ci 2>/dev/null || npm install
 COPY frontend/ ./
 # Same-origin when served by backend; set VITE_API_URL if backend is on another host
 ARG VITE_API_URL=
@@ -16,7 +16,7 @@ RUN npm run build
 FROM node:20-bookworm-slim AS backend
 WORKDIR /app/backend
 COPY backend/package.json backend/package-lock.json* ./
-RUN npm ci --omit=dev --ignore-scripts 2>/dev/null || npm install --ignore-scripts
+RUN npm ci --ignore-scripts 2>/dev/null || npm install --ignore-scripts
 COPY backend/ ./
 RUN npm run build
 
