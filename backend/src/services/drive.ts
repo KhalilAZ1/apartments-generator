@@ -176,3 +176,55 @@ export async function uploadImageToDrive(
     return null;
   }
 }
+
+/**
+ * Upload a plain text file to the given folder. Used for listing info (rooms, size, city, rent).
+ */
+export async function uploadTextFileToDrive(
+  folderId: string,
+  filename: string,
+  content: string,
+  logs: string[] = []
+): Promise<DriveUploadResult | null> {
+  const addLog = (msg: string) => logs.push(`[Drive] ${msg}`);
+
+  try {
+    const { drive } = await getDriveClient();
+    const buffer = Buffer.from(content, "utf-8");
+
+    const res = await drive.files.create({
+      requestBody: {
+        name: filename,
+        parents: [folderId],
+        mimeType: "text/plain",
+      },
+      media: {
+        mimeType: "text/plain",
+        body: Readable.from(buffer),
+      },
+      fields: "id, webViewLink",
+    });
+
+    const fileId = res.data.id;
+    const webViewLink = res.data.webViewLink;
+    if (!fileId) {
+      addLog(`Upload ${filename} returned no id`);
+      return null;
+    }
+
+    await drive.permissions.create({
+      fileId,
+      requestBody: { role: "reader", type: "anyone" },
+    });
+
+    addLog(`Uploaded ${filename} -> ${webViewLink ?? fileId}`);
+    return {
+      fileId,
+      webViewLink: webViewLink ?? `https://drive.google.com/file/d/${fileId}/view`,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    addLog(`Upload text file error: ${message}`);
+    return null;
+  }
+}

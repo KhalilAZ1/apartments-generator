@@ -1,0 +1,136 @@
+{
+  "cities": [
+    {
+      "name": "Berlin",
+      "zips": [
+        { "code": "10115", "rentPerSqm": 14.5 },
+        { "code": "10178", "rentPerSqm": 15.0 },
+        { "code": "10243", "rentPerSqm": 13.0 },
+        { "code": "10247", "rentPerSqm": 12.5 },
+        { "code": "10367", "rentPerSqm": 11.0 },
+        { "code": "10405", "rentPerSqm": 13.5 },
+        { "code": "10435", "rentPerSqm": 12.0 },
+        { "code": "10551", "rentPerSqm": 13.0 },
+        { "code": "10777", "rentPerSqm": 16.0 },
+        { "code": "10997", "rentPerSqm": 14.0 },
+        { "code": "12043", "rentPerSqm": 11.5 },
+        { "code": "12157", "rentPerSqm": 12.0 },
+        { "code": "13347", "rentPerSqm": 10.5 },
+        { "code": "14199", "rentPerSqm": 15.0 }
+      ]
+    },
+    {
+      "name": "Hamburg",
+      "zips": [
+        { "code": "20095", "rentPerSqm": 16.0 },
+        { "code": "20099", "rentPerSqm": 15.0 },
+        { "code": "20144", "rentPerSqm": 14.5 },
+        { "code": "20249", "rentPerSqm": 14.0 },
+        { "code": "20251", "rentPerSqm": 13.5 },
+        { "code": "20354", "rentPerSqm": 17.0 },
+        { "code": "20355", "rentPerSqm": 16.5 },
+        { "code": "20457", "rentPerSqm": 15.5 },
+        { "code": "20535", "rentPerSqm": 12.0 },
+        { "code": "21073", "rentPerSqm": 13.0 },
+        { "code": "22083", "rentPerSqm": 14.0 },
+        { "code": "22301", "rentPerSqm": 15.0 },
+        { "code": "22761", "rentPerSqm": 13.5 }
+      ]
+    },
+    {
+      "name": "München",
+      "zips": [
+        { "code": "80331", "rentPerSqm": 22.0 },
+        { "code": "80333", "rentPerSqm": 21.0 },
+        { "code": "80469", "rentPerSqm": 20.0 },
+        { "code": "80538", "rentPerSqm": 21.5 },
+        { "code": "80539", "rentPerSqm": 23.0 },
+        { "code": "80634", "rentPerSqm": 18.0 },
+        { "code": "80636", "rentPerSqm": 17.5 },
+        { "code": "80686", "rentPerSqm": 16.0 },
+        { "code": "80796", "rentPerSqm": 19.0 },
+        { "code": "80801", "rentPerSqm": 20.0 },
+        { "code": "80802", "rentPerSqm": 21.0 },
+        { "code": "80803", "rentPerSqm": 19.5 },
+        { "code": "80804", "rentPerSqm": 18.5 },
+        { "code": "80807", "rentPerSqm": 17.0 }
+      ]
+    },
+    {
+      "name": "Köln",
+      "zips": [
+        { "code": "50667", "rentPerSqm": 14.0 },
+        { "code": "50668", "rentPerSqm": 13.5 },
+        { "code": "50670", "rentPerSqm": 14.5 },
+        { "code": "50672", "rentPerSqm": 13.0 },
+        { "code": "50674", "rentPerSqm": 13.5 },
+        { "code": "50676", "rentPerSqm": 14.0 },
+        { "code": "50677", "rentPerSqm": 13.0 },
+        { "code": "50678", "rentPerSqm": 12.5 },
+        { "code": "50679", "rentPerSqm": 12.0 },
+        { "code": "50733", "rentPerSqm": 11.5 },
+        { "code": "50735", "rentPerSqm": 11.0 },
+        { "code": "50765", "rentPerSqm": 10.5 },
+        { "code": "50823", "rentPerSqm": 12.0 },
+        { "code": "50825", "rentPerSqm": 11.5 }
+      ]
+    },
+    {
+      "name": "Frankfurt am Main",
+      "zips": [
+        { "code": "60311", "rentPerSqm": 18.0 },
+        { "code": "60313", "rentPerSqm": 17.5 },
+        { "code": "60318", "rentPerSqm": 16.0 },
+        { "code": "60322", "rentPerSqm": 17.0 },
+        { "code": "60323", "rentPerSqm": 18.5 },
+        { "code": "60325", "rentPerSqm": 16.5 },
+        { "code": "60326", "rentPerSqm": 15.0 },
+        { "code": "60327", "rentPerSqm": 15.5 },
+        { "code": "60329", "rentPerSqm": 17.0 },
+        { "code": "60486", "rentPerSqm": 14.0 },
+        { "code": "60487", "rentPerSqm": 13.5 },
+        { "code": "60488", "rentPerSqm": 13.0 },
+        { "code": "60489", "rentPerSqm": 12.5 },
+        { "code": "60594", "rentPerSqm": 16.0 }
+      ]
+    },
+    {
+      "name": "Stuttgart",
+      "zips": [
+        { "code": "70173", "rentPerSqm": 16.0 },
+        { "code": "70174", "rentPerSqm": 15.5 },
+        { "code": "70176", "rentPerSqm": 15.0 },
+        { "code": "70178", "rentPerSqm": 14.5 },
+        { "code": "70180", "rentPerSqm": 14.0 },
+        { "code": "70182", "rentPerSqm": 13.5 },
+        { "code": "70184", "rentPerSqm": 13.0 },
+        { "code": "70186", "rentPerSqm": 12.5 },
+        { "code": "70188", "rentPerSqm": 12.0 },
+        { "code": "70190", "rentPerSqm": 11.5 },
+        { "code": "70191", "rentPerSqm": 11.0 },
+        { "code": "70192", "rentPerSqm": 12.0 },
+        { "code": "70193", "rentPerSqm": 11.5 },
+        { "code": "70195", "rentPerSqm": 11.0 }
+      ]
+    },
+    {
+      "name": "Düsseldorf",
+      "zips": [
+        { "code": "40210", "rentPerSqm": 14.0 },
+        { "code": "40211", "rentPerSqm": 13.5 },
+        { "code": "40212", "rentPerSqm": 13.0 },
+        { "code": "40213", "rentPerSqm": 14.5 },
+        { "code": "40215", "rentPerSqm": 14.0 },
+        { "code": "40217", "rentPerSqm": 12.0 },
+        { "code": "40219", "rentPerSqm": 12.5 },
+        { "code": "40221", "rentPerSqm": 11.5 },
+        { "code": "40223", "rentPerSqm": 11.0 },
+        { "code": "40225", "rentPerSqm": 12.0 },
+        { "code": "40227", "rentPerSqm": 11.5 },
+        { "code": "40229", "rentPerSqm": 11.0 },
+        { "code": "40231", "rentPerSqm": 10.5 },
+        { "code": "40233", "rentPerSqm": 10.0 }
+      ]
+    }
+  ]
+}

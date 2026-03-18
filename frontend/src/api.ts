@@ -126,6 +126,10 @@ export interface JobListingEntry {
   imageUrls?: string[];
   screenshots?: { step: string; url: string }[];
   costUsd?: number;
+  scrapeDurationMs?: number;
+  processStartedAt?: string;
+  processDurationMs?: number;
+  imagesProcessed?: number;
 }
 
 export type SelectionMode = "manual" | "auto";
@@ -136,6 +140,8 @@ export interface AppSettings {
   selectionModeAdmin: SelectionMode;
   selectionModeUser: SelectionMode;
   allowedHostsUser?: string[];
+  /** Gemini model ID used for non-admin users (set by admin in Settings). */
+  modelForUser?: string;
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -171,16 +177,23 @@ export async function updateSettings(settings: Partial<AppSettings>): Promise<Ap
 export async function processSelected(
   jobId: string,
   listingIndex: number,
-  selectedUrls: string[]
+  selectedUrls: string[],
+  selectionMode?: SelectionMode,
+  maxImages?: number
 ): Promise<{ ok: boolean }> {
   const token = getStoredToken();
   if (!token) throw new Error("Not authenticated");
+  const body: { selectedUrls: string[]; selectionMode: SelectionMode; maxImages?: number } = {
+    selectedUrls,
+    selectionMode: selectionMode ?? "manual",
+  };
+  if (typeof maxImages === "number" && maxImages > 0) body.maxImages = maxImages;
   const res = await fetch(
     `${getBaseUrl()}/api/jobs/${encodeURIComponent(jobId)}/listings/${listingIndex}/process-selected`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ selectedUrls }),
+      body: JSON.stringify(body),
     }
   );
   if (res.status === 401) {
@@ -199,13 +212,37 @@ export interface JobStatus {
   startedAt: string;
   finishedAt?: string;
   listings: JobListingEntry[];
+  /** Elapsed time since job started (ms). Present when job is returned from API. */
+  elapsedMs?: number;
+  /** Estimated remaining time (ms). Only when job is not finished. */
+  estimatedRemainingMs?: number;
 }
 
-export async function getJobStatus(jobId: string): Promise<JobStatus> {
+export type EstimatePhase = "scrape" | "process" | "full";
+
+export interface GetJobStatusOptions {
+  selectionMode?: SelectionMode;
+  maxImages?: number;
+  /** Manual: scrape (step 1) | process (step 2). Auto: full. */
+  estimatePhase?: EstimatePhase;
+  /** When estimatePhase is "process", number of images being processed (for history-based estimate). */
+  imagesToProcess?: number;
+}
+
+export async function getJobStatus(
+  jobId: string,
+  options?: GetJobStatusOptions
+): Promise<JobStatus> {
   const base = getBaseUrl();
   const token = getStoredToken();
   if (!token) throw new Error("Not authenticated");
-  const res = await fetch(`${base}/api/jobs/${encodeURIComponent(jobId)}`, {
+  const params = new URLSearchParams();
+  if (options?.selectionMode) params.set("selectionMode", options.selectionMode);
+  if (typeof options?.maxImages === "number" && options.maxImages > 0) params.set("maxImages", String(options.maxImages));
+  if (options?.estimatePhase) params.set("estimatePhase", options.estimatePhase);
+  if (typeof options?.imagesToProcess === "number" && options.imagesToProcess > 0) params.set("imagesToProcess", String(options.imagesToProcess));
+  const url = params.toString() ? `${base}/api/jobs/${encodeURIComponent(jobId)}?${params}` : `${base}/api/jobs/${encodeURIComponent(jobId)}`;
+  const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (res.status === 404) throw new Error("Job not found");

@@ -8,7 +8,7 @@ import type { Page } from "playwright";
 import { scrapeListingGallery, applyHumanLikePage, IMMOWELT_USER_AGENT, SCRAPERAPI_NO_CREDITS_ERROR } from "../scraper/immowelt";
 import { getOrCreateSession } from "../scraper-session";
 import { downloadImage, processImageWithGemini, GEMINI_IMAGE_MODELS, type GeminiImageModelId } from "../services/gemini";
-import { createListingFolder, uploadImageToDrive } from "../services/drive";
+import { createListingFolder, uploadImageToDrive, uploadTextFileToDrive } from "../services/drive";
 import { addJob, updateJob, getJob, isJobCancelled } from "../jobs/store";
 import { saveScreenshot, scheduleDeleteScreenshotsForJob } from "../screenshots";
 import { saveGeneratedImage, scheduleDeleteGeneratedForJob } from "../generated-images";
@@ -18,6 +18,8 @@ import { getProxyForSession, markScraperApiCreditsExhausted } from "../proxy-con
 import { ensurePortrait916 } from "../image/format";
 import { getSettings } from "../settings";
 import type { AuthRole } from "../auth";
+import { pickRandomCityAndZip } from "../data/german-cities";
+import { recordTiming, getTimingAverages, type SelectionMode as TimingSelectionMode } from "../data/timing-history";
 
 export { getProxyForSession };
 
@@ -115,7 +117,12 @@ async function runInBackground(
         addListing: { url, status: "Opening URL…", logs: [...listingLogs], error: null, startedAt: new Date().toISOString() },
       });
 
+      const scrapeStartMs = Date.now();
       let scrapeResult = await scrapeListingGallery(page, url, listingLogs);
+      if (isJobCancelled(jobId)) {
+        updateJob(jobId, { finishedAt: new Date().toISOString() });
+        return;
+      }
       // Merge scraper logs into listing log (scraper uses a copy, so we must copy back)
       listingLogs.length = 0;
       listingLogs.push(...scrapeResult.logs);
@@ -136,6 +143,10 @@ async function runInBackground(
           page = await contextNoProxy.newPage();
           await applyHumanLikePage(page);
           scrapeResult = await scrapeListingGallery(page, url, listingLogs);
+          if (isJobCancelled(jobId)) {
+            updateJob(jobId, { finishedAt: new Date().toISOString() });
+            return;
+          }
           listingLogs.length = 0;
           listingLogs.push(...scrapeResult.logs);
         } catch (retryErr) {
@@ -179,6 +190,7 @@ async function runInBackground(
       }
 
       // Pause for user to select images in the UI; Gemini/Drive run after process-selected.
+      const scrapeDurationMs = Date.now() - scrapeStartMs;
       listingLogs.push(`[${logTs()}] Scraped ${scrapeResult.imageUrls.length} images. Select images in the UI, then click "Process with selected".`);
       updateJob(jobId, {
         updateListing: {
@@ -187,6 +199,12 @@ async function runInBackground(
             imageUrls: scrapeResult.imageUrls,
             status: "Select images",
             logs: listingLogs,
+            rooms: scrapeResult.rooms,
+            sizeSqm: scrapeResult.sizeSqm,
+            scrapeDurationMs,
+            waitingDurationMs: scrapeResult.waitingDurationMs,
+            extractDurationMs: scrapeResult.extractDurationMs,
+            imagesExtracted: scrapeResult.imageUrls.length,
           },
         },
       });
@@ -216,10 +234,18 @@ async function runInBackground(
 export async function processSelectedHandler(req: Request, res: Response): Promise<void> {
   const jobId = req.params.jobId;
   const listingIndex = parseInt(req.params.listingIndex, 10);
-  const { selectedUrls } = (req.body as { selectedUrls?: string[] }) || {};
+  const { selectedUrls, selectionMode, maxImages } = (req.body as {
+    selectedUrls?: string[];
+    selectionMode?: string;
+    maxImages?: number;
+  }) || {};
   const job = getJob(jobId);
   if (!job || !Array.isArray(selectedUrls) || selectedUrls.length === 0) {
     res.status(400).json({ error: "Job not found or selectedUrls must be a non-empty array" });
+    return;
+  }
+  if (isJobCancelled(jobId)) {
+    res.status(409).json({ error: "Job was cancelled" });
     return;
   }
   const listing = job.listings[listingIndex];
@@ -234,17 +260,23 @@ export async function processSelectedHandler(req: Request, res: Response): Promi
     res.status(400).json({ error: "selectedUrls must be a subset of the scraped image URLs" });
     return;
   }
+  const mode: TimingSelectionMode = selectionMode === "auto" ? "auto" : "manual";
   const promptStr = job.promptStr ?? "Make this real estate photo more appealing for social media, vertical format.";
   const modelId = (job.modelId as GeminiImageModelId) ?? "gemini-2.5-flash-image";
   const listingId = deriveListingId(url);
   const listingLogs = [...(listing.logs || [])];
   const logTs = () => new Date().toISOString();
+  const processStartMs = Date.now();
 
   listingLogs.push(`[${logTs()}] User selected ${selectedUrls.length} images. Creating Drive folder…`);
   updateJob(jobId, {
     updateListing: {
       index: listingIndex,
-      update: { status: "Creating Drive folder…", logs: listingLogs },
+      update: {
+        status: "Creating Drive folder…",
+        logs: listingLogs,
+        processStartedAt: new Date().toISOString(),
+      },
     },
   });
 
@@ -264,6 +296,22 @@ export async function processSelectedHandler(req: Request, res: Response): Promi
     res.status(500).json({ error: "Could not create Google Drive folder." });
     return;
   }
+  if (isJobCancelled(jobId)) {
+    listingLogs.push(`[${logTs()}] Workflow was stopped by user.`);
+    updateJob(jobId, {
+      updateListing: {
+        index: listingIndex,
+        update: {
+          status: "Stopped",
+          logs: listingLogs,
+          error: "Workflow was stopped.",
+          finishedAt: new Date().toISOString(),
+        },
+      },
+    });
+    res.json({ ok: true, cancelled: true });
+    return;
+  }
 
   const generatedFiles: { originalUrl: string; driveFileUrl: string; previewUrl?: string }[] = [];
   let successCount = 0;
@@ -272,6 +320,22 @@ export async function processSelectedHandler(req: Request, res: Response): Promi
   let styleRef: { buffer: Buffer; mimeType: string } | undefined = undefined;
 
   for (let i = 0; i < selectedUrls.length; i++) {
+    if (isJobCancelled(jobId)) {
+      listingLogs.push(`[${logTs()}] Workflow was stopped by user.`);
+      updateJob(jobId, {
+        updateListing: {
+          index: listingIndex,
+          update: {
+            status: "Stopped",
+            logs: listingLogs,
+            error: "Workflow was stopped.",
+            finishedAt: new Date().toISOString(),
+          },
+        },
+      });
+      res.json({ ok: true, cancelled: true });
+      return;
+    }
     const entryImg = getJob(jobId)?.listings[listingIndex];
     listingLogs.push(`[${logTs()}] Processing image ${i + 1}/${totalImages} with Gemini…`);
     if (entryImg) {
@@ -338,10 +402,47 @@ export async function processSelectedHandler(req: Request, res: Response): Promi
     }
   }
 
+  // Build and upload apartment info (rooms, size, city, zip, approximate rent) to the same Drive folder.
+  try {
+    const rooms = listing.rooms;
+    const sizeSqm = listing.sizeSqm ?? 70;
+    const { cityName, zipCode, rentPerSqm } = pickRandomCityAndZip();
+    const warmFactor = 1.2;
+    // Smaller apartments (fewer rooms) typically have higher €/m²; apply room-based factor.
+    const roomFactor =
+      rooms == null ? 1
+      : rooms <= 1 ? 1.12
+      : rooms <= 2 ? 1.05
+      : rooms <= 3 ? 1
+      : rooms <= 4 ? 0.97
+      : 0.93;
+    const approximateRentEur = Math.round(rentPerSqm * sizeSqm * warmFactor * roomFactor);
+    const lines: string[] = [
+      "Apartment information",
+      "-------------------",
+      rooms != null ? `Rooms: ${rooms}` : "",
+      `Size: ${sizeSqm} m²`,
+      `City: ${cityName}`,
+      `Zip code: ${zipCode}`,
+      `Approximate rent (warm): ~${approximateRentEur} €`,
+    ].filter(Boolean);
+    const content = lines.join("\n");
+    await uploadTextFileToDrive(
+      folderResult.folderId,
+      "apartment-info.txt",
+      content,
+      listingLogs
+    );
+  } catch (infoErr) {
+    const msg = infoErr instanceof Error ? infoErr.message : String(infoErr);
+    listingLogs.push(`[${logTs()}] Could not create apartment info file: ${msg}`);
+  }
+
   const finalError =
     successCount === 0
       ? "No images could be generated or uploaded. Expand the listing logs below for details (e.g. download, Gemini, or Drive failure)."
       : undefined;
+  const processDurationMs = Date.now() - processStartMs;
   updateJob(jobId, {
     updateListing: {
       index: listingIndex,
@@ -358,9 +459,28 @@ export async function processSelectedHandler(req: Request, res: Response): Promi
         costUsd:
           listingCostUsd > 0 ? Math.round(listingCostUsd * 1e4) / 1e4 : undefined,
         imageUrls: undefined,
+        processDurationMs,
+        imagesProcessed: selectedUrls.length,
       },
     },
   });
+
+  const maxImagesNum = typeof maxImages === "number" && maxImages > 0 ? maxImages : selectedUrls.length;
+  if (
+    listing.waitingDurationMs != null &&
+    listing.extractDurationMs != null &&
+    listing.imagesExtracted != null
+  ) {
+    recordTiming({
+      waitingDurationMs: listing.waitingDurationMs,
+      extractDurationMs: listing.extractDurationMs,
+      imagesExtracted: listing.imagesExtracted,
+      processDurationMs,
+      imagesProcessed: selectedUrls.length,
+      selectionMode: mode,
+      maxImages: maxImagesNum,
+    });
+  }
 
   res.json({ ok: true });
 }

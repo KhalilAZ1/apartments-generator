@@ -19,6 +19,7 @@ import { getCredentials as getCredentialsData, getRoleNames, updateCredentials }
 import { closeSession } from "./scraper-session";
 import { getProxyForSession, enableProxyForSession, disableProxyForSession, isProxyManuallyEnabled } from "./proxy-config";
 import { getRecentJobs, getJob, cancelJob } from "./jobs/store";
+import { estimateRemainingMs } from "./data/timing-history";
 import { getScreenshotPath, cleanupOldScreenshots, deleteAllScreenshots } from "./screenshots";
 import { getGeneratedImagePath, scheduleDeleteGeneratedForJob, deleteAllGenerated, cleanupOldGenerated } from "./generated-images";
 import { ensurePlaywrightChromium } from "./playwright-ensure";
@@ -128,12 +129,14 @@ app.post("/api/settings", authMiddleware, adminOnlyMiddleware, (req, res) => {
     selectionModeAdmin?: string;
     selectionModeUser?: string;
     allowedHostsUser?: unknown;
+    modelForUser?: string;
   };
   const update: Parameters<typeof updateSettings>[0] = {};
   if (typeof body.maxImagesToSelect === "number") update.maxImagesToSelect = body.maxImagesToSelect;
   if (body.selectionModeAdmin === "manual" || body.selectionModeAdmin === "auto") update.selectionModeAdmin = body.selectionModeAdmin;
   if (body.selectionModeUser === "manual" || body.selectionModeUser === "auto") update.selectionModeUser = body.selectionModeUser;
   if (Array.isArray(body.allowedHostsUser)) update.allowedHostsUser = body.allowedHostsUser as any;
+  if (typeof body.modelForUser === "string") update.modelForUser = body.modelForUser;
   const next = updateSettings(update);
   res.json(next);
 });
@@ -163,17 +166,38 @@ app.post(
   processSelectedHandler
 );
 
-// Job status (no auth; jobId is UUID)
+// Job status (auth required). Augmented with elapsedMs and estimatedRemainingMs for timer UI.
+// Query: selectionMode=manual|auto, maxImages=6 — used for estimate (three-step: waiting + extract×N + process×N).
 app.get("/api/jobs/:jobId", authMiddleware, (req, res) => {
   const job = getJob(req.params.jobId);
   if (!job) {
     res.status(404).json({ error: "Job not found" });
     return;
   }
-  res.json(job);
+  const startedAt = new Date(job.startedAt).getTime();
+  const now = Date.now();
+  const elapsedMs = job.finishedAt
+    ? new Date(job.finishedAt).getTime() - startedAt
+    : now - startedAt;
+  const selectionMode = (req.query.selectionMode as string) === "auto" ? "auto" : "manual";
+  const maxImages = Math.min(20, Math.max(1, parseInt(String(req.query.maxImages || "5"), 10) || 5));
+  const phaseParam = req.query.estimatePhase as string;
+  const estimatePhase =
+    phaseParam === "scrape" ? "scrape" : phaseParam === "process" ? "process" : "full";
+  const imagesToProcessParam = req.query.imagesToProcess as string | undefined;
+  const imagesToProcess =
+    imagesToProcessParam != null ? Math.min(20, Math.max(1, parseInt(imagesToProcessParam, 10) || 1)) : undefined;
+  const estimatedRemainingMs = estimateRemainingMs(
+    job.listings,
+    selectionMode,
+    maxImages,
+    estimatePhase,
+    imagesToProcess
+  );
+  res.json({ ...job, elapsedMs, estimatedRemainingMs });
 });
 
-// Cancel a running job (no auth; jobId is UUID)
+// Cancel a running job (auth required)
 app.post("/api/jobs/:jobId/cancel", authMiddleware, (req, res) => {
   const jobId = req.params.jobId;
   const job = getJob(jobId);

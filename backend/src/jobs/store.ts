@@ -17,6 +17,24 @@ export interface ListingJobEntry {
   imageUrls?: string[];
   screenshots?: { step: string; url: string }[];
   costUsd?: number;
+  /** Number of rooms (from listing page). Used for Drive info file. */
+  rooms?: number;
+  /** Living area in m² (from listing page). Used for Drive info file. */
+  sizeSqm?: number;
+  /** Time spent opening/scraping this listing (ms). Used for timer and estimates. */
+  scrapeDurationMs?: number;
+  /** Time from start until gallery/collect started (ms). For three-step estimate. */
+  waitingDurationMs?: number;
+  /** Time to collect image URLs after gallery ready (ms). For three-step estimate. */
+  extractDurationMs?: number;
+  /** Number of image URLs extracted (for extract-per-image average). */
+  imagesExtracted?: number;
+  /** When Gemini/Drive processing started (ISO). Enables live "Processing" step timer. */
+  processStartedAt?: string;
+  /** Time spent on Gemini + Drive for this listing (ms). Used for timer and estimates. */
+  processDurationMs?: number;
+  /** Number of images sent to Gemini for this listing (for per-image average). */
+  imagesProcessed?: number;
 }
 
 export interface JobRecord {

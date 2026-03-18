@@ -25,9 +25,14 @@ export interface AppSettings {
    * Examples: "immowelt.at", "immowelt.de" (variants like "www.immowelt.at" are auto-included).
    */
   allowedHostsUser: string[];
+  /** Gemini image model ID used for non-admin users. Admin chooses in Settings. */
+  modelForUser: string;
 }
 
 const VALID_SELECTION_MODES: SelectionMode[] = ["manual", "auto"];
+
+const VALID_GEMINI_MODEL_IDS = ["gemini-2.5-flash-image", "gemini-3.1-flash-image-preview", "gemini-3-pro-image-preview"] as const;
+const DEFAULT_MODEL_FOR_USER = "gemini-2.5-flash-image";
 
 function normalizeAndExpandHosts(rawHosts: unknown[]): string[] {
   const set = new Set<string>();
@@ -61,6 +66,10 @@ function readSettings(): AppSettings {
       selectionModeAdmin: VALID_SELECTION_MODES.includes(data.selectionModeAdmin as SelectionMode) ? (data.selectionModeAdmin as SelectionMode) : "manual",
       selectionModeUser: VALID_SELECTION_MODES.includes(data.selectionModeUser as SelectionMode) ? (data.selectionModeUser as SelectionMode) : "manual",
       allowedHostsUser: allowedHostsUser.length > 0 ? allowedHostsUser : normalizeAndExpandHosts(["immowelt.at"]),
+      modelForUser:
+        typeof (data as any).modelForUser === "string" && VALID_GEMINI_MODEL_IDS.includes((data as any).modelForUser as any)
+          ? (data as any).modelForUser
+          : DEFAULT_MODEL_FOR_USER,
     };
   } catch {
     return {
@@ -69,6 +78,7 @@ function readSettings(): AppSettings {
       selectionModeAdmin: "manual",
       selectionModeUser: "manual",
       allowedHostsUser: normalizeAndExpandHosts(["immowelt.at"]),
+      modelForUser: DEFAULT_MODEL_FOR_USER,
     };
   }
 }
@@ -95,6 +105,10 @@ export function updateSettings(update: Partial<AppSettings>): AppSettings {
     selectionModeAdmin: VALID_SELECTION_MODES.includes(update.selectionModeAdmin as SelectionMode) ? (update.selectionModeAdmin as SelectionMode) : current.selectionModeAdmin,
     selectionModeUser: VALID_SELECTION_MODES.includes(update.selectionModeUser as SelectionMode) ? (update.selectionModeUser as SelectionMode) : current.selectionModeUser,
     allowedHostsUser: nextAllowedHostsUser,
+    modelForUser:
+      typeof (update as any).modelForUser === "string" && VALID_GEMINI_MODEL_IDS.includes((update as any).modelForUser as any)
+        ? (update as any).modelForUser
+        : current.modelForUser,
   };
   cached = next;
   try {

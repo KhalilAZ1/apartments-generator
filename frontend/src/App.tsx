@@ -20,6 +20,7 @@ import {
   type JobListingEntry,
   type AppSettings,
   type SelectionMode,
+  type EstimatePhase,
   GEMINI_MODEL_IDS,
   type GeminiModelId,
   AUTH_EXPIRED_EVENT,
@@ -216,13 +217,15 @@ function ImageSelectionCard({
   listingIndex,
   listing,
   maxImages,
+  onProcessStart,
   onProcessComplete,
 }: {
   jobId: string;
   listingIndex: number;
   listing: JobListingEntry;
   maxImages: number;
-  onProcessComplete: () => void;
+  onProcessStart?: (selectedCount: number) => void;
+  onProcessComplete: (selectedCount?: number) => void | Promise<void>;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [processing, setProcessing] = useState(false);
@@ -243,10 +246,12 @@ function ImageSelectionCard({
     }
     setErr("");
     setProcessing(true);
+    onProcessStart?.(selected.size);
     try {
-      await processSelected(jobId, listingIndex, Array.from(selected));
+      await processSelected(jobId, listingIndex, Array.from(selected), "manual", maxImages);
+      await Promise.resolve(onProcessComplete(selected.size));
       const poll = async () => {
-        const status = await getJobStatus(jobId);
+        const status = await getJobStatus(jobId, { selectionMode: "manual", maxImages });
         onProcessComplete();
         const entry = status.listings[listingIndex];
         if (entry?.folderUrl ?? entry?.finishedAt) {
@@ -324,6 +329,7 @@ function AutoFirstNCard({
   listingIndex,
   listing,
   maxImages,
+  onProcessStart,
   onProcessComplete,
   autoStart = false,
 }: {
@@ -331,6 +337,7 @@ function AutoFirstNCard({
   listingIndex: number;
   listing: JobListingEntry;
   maxImages: number;
+  onProcessStart?: () => void;
   onProcessComplete: () => void;
   autoStart?: boolean;
 }) {
@@ -347,10 +354,11 @@ function AutoFirstNCard({
     }
     setErr("");
     setProcessing(true);
+    onProcessStart?.();
     try {
-      await processSelected(jobId, listingIndex, firstN);
+      await processSelected(jobId, listingIndex, firstN, "auto", maxImages);
       const poll = async () => {
-        const status = await getJobStatus(jobId);
+        const status = await getJobStatus(jobId, { selectionMode: "auto", maxImages });
         onProcessComplete();
         const entry = status.listings[listingIndex];
         if (entry?.folderUrl ?? entry?.finishedAt) {
@@ -364,7 +372,7 @@ function AutoFirstNCard({
       setErr(e instanceof Error ? e.message : "Failed to process");
       setProcessing(false);
     }
-  }, [jobId, listingIndex, firstN, onProcessComplete]);
+  }, [jobId, listingIndex, firstN, onProcessStart, onProcessComplete]);
 
   useEffect(() => {
     if (autoStart && firstN.length > 0 && !startedRef.current) {
@@ -453,6 +461,8 @@ function MainScreen() {
   const selectionModeAdmin = settings?.selectionModeAdmin ?? "manual";
   const selectionModeUser = settings?.selectionModeUser ?? "manual";
   const rawAllowedHostsUser = settings?.allowedHostsUser ?? ["immowelt.at"];
+  const modelForUser = (settings?.modelForUser as GeminiModelId) ?? "gemini-2.5-flash-image";
+  const effectiveModel = isAdmin ? model : modelForUser;
   const allowedHostsUser = Array.from(
     new Set(
       rawAllowedHostsUser.map((h) => {
@@ -462,11 +472,59 @@ function MainScreen() {
     )
   );
   const useAutoSelect = isAdmin ? selectionModeAdmin === "auto" : selectionModeUser === "auto";
-  const [settingsTab, setSettingsTab] = useState<"allowedHosts" | "passwords" | "limits">("allowedHosts");
+  const [settingsTab, setSettingsTab] = useState<"allowedHosts" | "passwords" | "limits" | "model">("allowedHosts");
   const [newHost, setNewHost] = useState("");
   const [allowedHostsSaving, setAllowedHostsSaving] = useState(false);
   const [allowedHostsError, setAllowedHostsError] = useState("");
   const [editRole, setEditRole] = useState<"admin" | "user" | null>(null);
+  const [timerTick, setTimerTick] = useState(0);
+  const [countdownBase, setCountdownBase] = useState<{ ms: number; at: number } | null>(null);
+  const [frozenCountdownMs, setFrozenCountdownMs] = useState<number | null>(null);
+  const countdownValueRef = useRef(0);
+  const inSelectionPhaseRef = useRef(false);
+  const countdownBaseExistsRef = useRef(false);
+
+  const setJobStatusWithCountdown = useCallback((next: JobStatus | null) => {
+    if (next) {
+      const nextAwaiting =
+        next.listings.filter((l) => l.imageUrls && l.imageUrls.length > 0 && !l.folderUrl) ?? [];
+      const nextAnyInProcess = nextAwaiting.some(
+        (l) =>
+          l.status === "Creating Drive folder…" ||
+          /^Processing image\s/i.test(l.status ?? "") ||
+          /^Uploading\s/i.test(l.status ?? "")
+      );
+      const nextInSelectionPhase =
+        next.finishedAt && nextAwaiting.length > 0 && !nextAnyInProcess;
+      const transitioningToProcessing =
+        inSelectionPhaseRef.current && !nextInSelectionPhase && nextAnyInProcess;
+      if (nextInSelectionPhase) countdownBaseExistsRef.current = false;
+      const shouldUpdateCountdown =
+        next.estimatedRemainingMs != null &&
+        next.estimatedRemainingMs > 0 &&
+        (!countdownBaseExistsRef.current || transitioningToProcessing || nextAnyInProcess);
+      setJobStatus(next);
+      if (shouldUpdateCountdown && next.estimatedRemainingMs != null) {
+        setCountdownBase({ ms: next.estimatedRemainingMs, at: Date.now() });
+        countdownBaseExistsRef.current = true;
+      } else if (next.estimatedRemainingMs != null && next.estimatedRemainingMs <= 0) {
+        setCountdownBase(null);
+        countdownBaseExistsRef.current = false;
+      } else if (
+        !next.estimatedRemainingMs &&
+        (nextAnyInProcess || (next.finishedAt && nextAwaiting.length > 0))
+      ) {
+        // Keep existing countdown when response had no estimate but job is in process/selection
+      } else if (!next.estimatedRemainingMs) {
+        setCountdownBase(null);
+        countdownBaseExistsRef.current = false;
+      }
+    } else {
+      setJobStatus(next);
+      setCountdownBase(null);
+      countdownBaseExistsRef.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     getSettings()
@@ -502,25 +560,44 @@ function MainScreen() {
       setResults(null);
       setTotalCostUsd(undefined);
       setJobStatus(null);
+      setCountdownBase(null);
+      countdownBaseExistsRef.current = false;
       setLoading(true);
       try {
-        const { jobId } = await startProcessListings(lines, prompt, model);
-        const first = await getJobStatus(jobId);
-        setJobStatus(first);
+        const { jobId } = await startProcessListings(lines, prompt, effectiveModel);
+        const first = await getJobStatus(jobId, {
+          selectionMode: useAutoSelect ? "auto" : "manual",
+          maxImages: maxImagesToSelect,
+          estimatePhase: useAutoSelect ? "full" : "scrape",
+        });
+        setJobStatusWithCountdown(first);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Request failed");
         setLoading(false);
       }
     },
-    [urlText, prompt, model]
+    [urlText, prompt, effectiveModel, useAutoSelect, maxImagesToSelect]
   );
+
+  const getEstimatePhase = (): EstimatePhase => {
+    if (useAutoSelect) return "full";
+    if (!jobStatus?.finishedAt) return "scrape";
+    return "process";
+  };
 
   useEffect(() => {
     if (!loading || !jobStatus || jobStatus.finishedAt) return;
     const interval = setInterval(() => {
-      getJobStatus(jobStatus.id)
-        .then((next) => {
+      getJobStatus(jobStatus.id, {
+        selectionMode: useAutoSelect ? "auto" : "manual",
+        maxImages: maxImagesToSelect,
+        estimatePhase: getEstimatePhase(),
+      }).then((next) => {
           setJobStatus(next);
+          if (next.estimatedRemainingMs != null && next.estimatedRemainingMs > 0 && !countdownBaseExistsRef.current) {
+            setCountdownBase({ ms: next.estimatedRemainingMs, at: Date.now() });
+            countdownBaseExistsRef.current = true;
+          }
           if (next.finishedAt) {
             setResults(next.listings.map(jobListingToResult));
             setTotalCostUsd(
@@ -533,6 +610,92 @@ function MainScreen() {
     }, 1500);
     return () => clearInterval(interval);
   }, [loading, jobStatus?.id, jobStatus?.finishedAt]);
+
+  useEffect(() => {
+    if (!jobStatus || jobStatus.finishedAt) return;
+    const interval = setInterval(() => setTimerTick((n) => n + 1), 1000);
+    return () => clearInterval(interval);
+  }, [jobStatus?.id, jobStatus?.finishedAt]);
+
+  useEffect(() => {
+    if (countdownBase == null) return;
+    const interval = setInterval(() => setTimerTick((n) => n + 1), 1000);
+    return () => clearInterval(interval);
+  }, [countdownBase != null]);
+
+  const listingsAwaitingSelection =
+    jobStatus?.listings.filter((l) => l.imageUrls && l.imageUrls.length > 0 && !l.folderUrl) ?? [];
+  const hasAnyListingDone =
+    (jobStatus?.listings?.some((l) => l.folderUrl && !l.error) ?? false);
+  const anyListingInProcess = listingsAwaitingSelection.some(
+    (l) =>
+      l.status === "Creating Drive folder…" ||
+      /^Processing image\s/i.test(l.status ?? "") ||
+      /^Uploading\s/i.test(l.status ?? "")
+  );
+  const inSelectionPhase =
+    jobStatus &&
+    jobStatus.finishedAt &&
+    listingsAwaitingSelection.length > 0 &&
+    !anyListingInProcess;
+  inSelectionPhaseRef.current = Boolean(inSelectionPhase);
+
+  const liveCountdownMs =
+    countdownBase != null
+      ? Math.max(0, countdownBase.ms - (Date.now() - countdownBase.at))
+      : (jobStatus?.estimatedRemainingMs ?? 0);
+  countdownValueRef.current = liveCountdownMs;
+
+  useEffect(() => {
+    if (useAutoSelect) {
+      if (inSelectionPhase) {
+        setFrozenCountdownMs((c) => (c === null ? countdownValueRef.current : c));
+      } else {
+        setFrozenCountdownMs(null);
+      }
+    } else {
+      if (inSelectionPhase) {
+        setCountdownBase(null);
+        countdownBaseExistsRef.current = false;
+        setFrozenCountdownMs(null);
+      } else {
+        setFrozenCountdownMs(null);
+      }
+    }
+  }, [inSelectionPhase, useAutoSelect]);
+
+  const countdownMs = useAutoSelect && inSelectionPhase && frozenCountdownMs != null ? frozenCountdownMs : liveCountdownMs;
+  const countdownSec = Math.floor(countdownMs / 1000);
+  const countdownStr =
+    countdownSec >= 3600
+      ? `~${Math.floor(countdownSec / 3600)}h ${Math.floor((countdownSec % 3600) / 60)}m`
+      : countdownSec >= 60
+        ? `~${Math.floor(countdownSec / 60)}m ${countdownSec % 60}s`
+        : countdownSec > 0
+          ? `~${countdownSec}s`
+          : "0s";
+
+  const hasEstimate =
+    countdownBase != null || (jobStatus?.estimatedRemainingMs != null && jobStatus.estimatedRemainingMs > 0);
+  const showTimer =
+    hasEstimate && (useAutoSelect || !inSelectionPhase);
+  const showTimerInResults = hasEstimate;
+  const countdownDisplay = (
+    <span
+      style={{ fontSize: 14, color: "#555" }}
+      title={
+        useAutoSelect
+          ? "Countdown for full process (scrape + process)."
+          : inSelectionPhase
+            ? "Countdown for process step."
+            : anyListingInProcess
+              ? "Countdown for process step (Gemini + Drive)."
+              : "Countdown for scrape step (open pages + extract images)."
+      }
+    >
+      Est. remaining: {countdownStr}
+    </span>
+  );
 
   const handleLogout = async () => {
     await logout();
@@ -651,6 +814,9 @@ function MainScreen() {
                 </button>
                 <button type="button" style={{ ...styles.settingsTabBtn, ...(settingsTab === "limits" ? styles.settingsTabBtnActive : {}) }} onClick={() => setSettingsTab("limits")}>
                   Max images & Selection
+                </button>
+                <button type="button" style={{ ...styles.settingsTabBtn, ...(settingsTab === "model" ? styles.settingsTabBtnActive : {}) }} onClick={() => setSettingsTab("model")}>
+                  Nano Banana model
                 </button>
               </div>
 
@@ -908,6 +1074,38 @@ function MainScreen() {
                     </div>
                   </>
                 )}
+
+                {settingsTab === "model" && (
+                  <>
+                    <div style={styles.settingsPanelTitle}>Nano Banana model (for users)</div>
+                    <div style={styles.settingsPanelDesc}>This model is used when a non-admin user runs Process listings. Users do not see a model selector.</div>
+                    <div style={styles.modelButtons}>
+                      {GEMINI_MODEL_IDS.map((id) => (
+                        <button
+                          key={id}
+                          type="button"
+                          title={MODEL_DESCRIPTIONS[id]}
+                          style={{
+                            ...styles.modelBtn,
+                            ...(modelForUser === id ? styles.modelBtnActive : {}),
+                          }}
+                          onClick={async () => {
+                            setSettings((s) => (s ? { ...s, modelForUser: id } : null));
+                            try {
+                              const next = await updateSettings({ modelForUser: id });
+                              setSettings(next);
+                            } catch {
+                              // ignore
+                            }
+                          }}
+                        >
+                          {MODEL_LABELS[id]}
+                        </button>
+                      ))}
+                    </div>
+                    <p style={styles.modelDescription}>{MODEL_DESCRIPTIONS[modelForUser]}</p>
+                  </>
+                )}
               </div>
             </div>
 
@@ -963,29 +1161,31 @@ function MainScreen() {
         </div>
       )}
       <form onSubmit={handleSubmit} style={styles.form}>
-        <div style={styles.modelSection}>
-          <span style={styles.modelSectionTitle}>1. Choose Gemini model</span>
-          <div style={styles.modelButtons}>
-            {GEMINI_MODEL_IDS.map((id) => (
-              <button
-                key={id}
-                type="button"
-                title={MODEL_DESCRIPTIONS[id]}
-                style={{
-                  ...styles.modelBtn,
-                  ...(model === id ? styles.modelBtnActive : {}),
-                }}
-                onClick={() => setModel(id)}
-                disabled={loading}
-              >
-                {MODEL_LABELS[id]}
-              </button>
-            ))}
+        {isAdmin && (
+          <div style={styles.modelSection}>
+            <span style={styles.modelSectionTitle}>1. Choose Gemini model</span>
+            <div style={styles.modelButtons}>
+              {GEMINI_MODEL_IDS.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  title={MODEL_DESCRIPTIONS[id]}
+                  style={{
+                    ...styles.modelBtn,
+                    ...(model === id ? styles.modelBtnActive : {}),
+                  }}
+                  onClick={() => setModel(id)}
+                  disabled={loading}
+                >
+                  {MODEL_LABELS[id]}
+                </button>
+              ))}
+            </div>
+            <p style={styles.modelDescription}>{MODEL_DESCRIPTIONS[model]}</p>
           </div>
-          <p style={styles.modelDescription}>{MODEL_DESCRIPTIONS[model]}</p>
-        </div>
+        )}
         <label style={styles.label}>
-          2. Immowelt URLs (max 5 URLs)
+          {isAdmin ? "2. Immowelt URLs (max 5 URLs)" : "1. Immowelt URLs (max 5 URLs)"}
           <textarea
             value={urlText}
             onChange={(e) => setUrlText(e.target.value)}
@@ -996,7 +1196,7 @@ function MainScreen() {
           />
         </label>
         <label style={styles.label}>
-          3. Gemini image prompt
+          {isAdmin ? "3. Gemini image prompt" : "2. Gemini image prompt"}
           <textarea
             value={prompt}
             onChange={(e) => handlePromptChange(e.target.value)}
@@ -1011,27 +1211,41 @@ function MainScreen() {
         {error && <p style={styles.error}>{error}</p>}
       </form>
 
-      {loading && jobStatus && (
-        <section style={styles.progressSection}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-            <h2 style={styles.progressTitle}>Progress</h2>
-            {getStoredRole() !== "user" && !jobStatus.finishedAt && (
+      {(loading && jobStatus) || (jobStatus && listingsAwaitingSelection.length > 0) ? (
+        <div style={{ marginTop: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", marginBottom: 8 }}>
+            <h2 style={styles.sectionTitle}>Progress</h2>
+            {getStoredRole() !== "user" && jobStatus && (!jobStatus.finishedAt || listingsAwaitingSelection.length > 0) && (
               <button
                 type="button"
                 onClick={async () => {
                   if (!jobStatus?.id) return;
                   try {
                     await cancelJob(jobStatus.id);
+                    setJobStatus(null);
+                    setResults(null);
+                    setLoading(false);
+                    setCountdownBase(null);
+                    countdownBaseExistsRef.current = false;
                   } catch (e) {
                     setError(e instanceof Error ? e.message : "Failed to stop");
                   }
                 }}
-                style={{ ...styles.headerBtn, background: "#c62828", color: "#fff" }}
+                style={{
+                  ...styles.headerBtn,
+                  border: "2px solid #c62828",
+                  background: "#c62828",
+                  color: "#fff",
+                }}
               >
                 Stop workflow
               </button>
             )}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
+              {showTimer ? countdownDisplay : null}
+            </div>
           </div>
+          <section style={styles.progressSection}>
           <p style={styles.progressHint}>
             Screenshots of the page and generated photos appear below as they are created.
           </p>
@@ -1087,45 +1301,110 @@ function MainScreen() {
               )}
             </div>
           ))}
-        </section>
-      )}
+          {jobStatus.finishedAt && listingsAwaitingSelection.length > 0 && (
+            <>
+              <p style={{ ...styles.progressHint, marginTop: 16 }}>
+                Select images for Gemini, then click &quot;Process with selected&quot;. When done, results appear below.
+              </p>
+              {listingsAwaitingSelection.map((listing, idx) => {
+                const i = jobStatus!.listings.indexOf(listing);
+                if (i < 0) return null;
+                return listing.imageUrls && listing.imageUrls.length > 0 && !listing.folderUrl ? (
+                  useAutoSelect ? (
+                    <AutoFirstNCard
+                      key={i}
+                      jobId={jobStatus!.id}
+                      listingIndex={i}
+                      listing={listing}
+                      maxImages={maxImagesToSelect}
+                      onProcessStart={() => {
+                        const optimisticMs = Math.max(30000, maxImagesToSelect * 12 * 1000);
+                        setCountdownBase({ ms: optimisticMs, at: Date.now() });
+                        countdownBaseExistsRef.current = true;
+                        getJobStatus(jobStatus!.id, {
+                          selectionMode: "auto",
+                          maxImages: maxImagesToSelect,
+                          estimatePhase: "full",
+                        })
+                          .then(setJobStatusWithCountdown)
+                          .catch(() => {});
+                      }}
+                      onProcessComplete={() =>
+                        getJobStatus(jobStatus!.id, {
+                          selectionMode: "auto",
+                          maxImages: maxImagesToSelect,
+                          estimatePhase: "full",
+                        }).then(setJobStatusWithCountdown)
+                      }
+                      autoStart
+                    />
+                  ) : (
+                    <ImageSelectionCard
+                      key={i}
+                      jobId={jobStatus!.id}
+                      listingIndex={i}
+                      listing={listing}
+                      maxImages={maxImagesToSelect}
+                      onProcessStart={(selectedCount) => {
+                        const optimisticMs = Math.max(30000, selectedCount * 12 * 1000);
+                        setCountdownBase({ ms: optimisticMs, at: Date.now() });
+                        countdownBaseExistsRef.current = true;
+                        getJobStatus(jobStatus!.id, {
+                          selectionMode: "manual",
+                          maxImages: maxImagesToSelect,
+                          estimatePhase: "process",
+                          imagesToProcess: selectedCount,
+                        })
+                          .then(setJobStatusWithCountdown)
+                          .catch(() => {});
+                      }}
+                      onProcessComplete={(selectedCount) => {
+                        getJobStatus(jobStatus!.id, {
+                          selectionMode: "manual",
+                          maxImages: maxImagesToSelect,
+                          estimatePhase: "process",
+                          ...(selectedCount != null ? { imagesToProcess: selectedCount } : {}),
+                        })
+                          .then(setJobStatusWithCountdown)
+                          .catch(() => {});
+                      }}
+                    />
+                  )
+                ) : null;
+              })}
+            </>
+          )}
+          </section>
+        </div>
+      ) : null}
 
-      {(results || (jobStatus?.finishedAt && jobStatus.listings.length > 0)) && jobStatus && (
+      {!loading &&
+        jobStatus &&
+        jobStatus.finishedAt &&
+        hasAnyListingDone &&
+        listingsAwaitingSelection.length === 0 && (
         <section style={styles.results}>
-          <h2>Results</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", marginBottom: 8 }}>
+            <h2 style={{ ...styles.sectionTitle, flex: "1 1 auto" }}>Results</h2>
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
+              {showTimerInResults ? countdownDisplay : null}
+            </div>
+          </div>
           {isAdmin && typeof totalCostUsd === "number" && totalCostUsd > 0 && (
             <p style={styles.totalCost}>Total cost: ${totalCostUsd.toFixed(4)}</p>
           )}
-          {jobStatus.listings.map((listing, i) =>
-            listing.imageUrls && listing.imageUrls.length > 0 && !listing.folderUrl ? (
-              useAutoSelect ? (
-                <AutoFirstNCard
+          {jobStatus.listings
+            .filter((l) => l.folderUrl)
+            .map((listing, idx) => {
+              const i = jobStatus.listings.indexOf(listing);
+              return (
+                <ListingResultCard
                   key={i}
-                  jobId={jobStatus.id}
-                  listingIndex={i}
-                  listing={listing}
-                  maxImages={maxImagesToSelect}
-                  onProcessComplete={() => getJobStatus(jobStatus.id).then(setJobStatus)}
-                  autoStart
+                  result={jobListingToResult(listing)}
+                  isAdmin={isAdmin}
                 />
-              ) : (
-                <ImageSelectionCard
-                  key={i}
-                  jobId={jobStatus.id}
-                  listingIndex={i}
-                  listing={listing}
-                  maxImages={maxImagesToSelect}
-                  onProcessComplete={() => getJobStatus(jobStatus.id).then(setJobStatus)}
-                />
-              )
-            ) : (
-              <ListingResultCard
-                key={i}
-                result={jobListingToResult(listing)}
-                isAdmin={isAdmin}
-              />
-            )
-          )}
+              );
+            })}
         </section>
       )}
     </div>
@@ -1323,7 +1602,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#333",
     borderWidth: 2,
     borderStyle: "solid",
-    borderColor: "transparent",
+    borderColor: "#d0d0d0",
     borderRadius: 6,
     cursor: "pointer",
     outline: "none",
@@ -1410,6 +1689,10 @@ const styles: Record<string, React.CSSProperties> = {
     margin: "0 0 8px",
     fontSize: 18,
   },
+  sectionTitle: {
+    margin: 0,
+    fontSize: 22,
+  },
   progressHint: {
     margin: "0 0 16px",
     fontSize: 13,
@@ -1489,7 +1772,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#666",
   },
   results: {
-    marginTop: 32,
+    marginTop: 24,
   },
   resultCard: {
     borderWidth: 2,

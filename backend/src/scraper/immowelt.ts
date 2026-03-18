@@ -44,10 +44,80 @@ export interface ScrapeResult {
   logs: string[];
   screenshots: ScrapeScreenshot[];
   error: string | null;
+  /** Number of rooms (Zimmer) if found on the listing page. */
+  rooms?: number;
+  /** Living area in m² (Wohnfläche) if found on the listing page. */
+  sizeSqm?: number;
+  /** Time from start until gallery/collect started (ms). For timing history. */
+  waitingDurationMs?: number;
+  /** Time to collect image URLs after gallery ready (ms). For timing history. */
+  extractDurationMs?: number;
 }
 
 /** When ScraperAPI returns this error, the route will disable proxy and retry without it. */
 export const SCRAPERAPI_NO_CREDITS_ERROR = "SCRAPERAPI_NO_CREDITS";
+
+/**
+ * Try to extract number of rooms and living area (m²) from the listing page.
+ * Checks body text and page title (e.g. "1 Zimmer • 60 m² • frei ab..." in title).
+ */
+async function extractListingDetails(page: Page): Promise<{ rooms?: number; sizeSqm?: number }> {
+  const result: { rooms?: number; sizeSqm?: number } = {};
+  const parseRooms = (text: string): number | undefined => {
+    const m = text.match(/(\d+(?:[,.]\d+)?)\s*Zimmer/i);
+    if (!m) return undefined;
+    const num = parseFloat(m[1].replace(",", "."));
+    return Number.isFinite(num) && num >= 1 && num <= 20 ? num : undefined;
+  };
+  const parseSqm = (text: string): number | undefined => {
+    const m = text.match(/(?:Wohnfläche|Fläche|Living area)[\s:]*(\d+(?:[,.]\d+)?)\s*m²/i)
+      || text.match(/(\d+(?:[,.]\d+)?)\s*m²/i);
+    if (!m) return undefined;
+    const num = parseFloat(m[1].replace(",", "."));
+    return Number.isFinite(num) && num >= 10 && num <= 500 ? num : undefined;
+  };
+  try {
+    const bodyText = await page.locator("body").first().textContent({ timeout: 5000 }).catch(() => null);
+    if (bodyText) {
+      result.rooms = parseRooms(bodyText);
+      result.sizeSqm = parseSqm(bodyText);
+    }
+    const pageTitle = await page.title().catch(() => "");
+    if (pageTitle) {
+      if (result.rooms == null) result.rooms = parseRooms(pageTitle);
+      if (result.sizeSqm == null) result.sizeSqm = parseSqm(pageTitle);
+    }
+  } catch (_) {}
+  return result;
+}
+
+/**
+ * Click "Zurück zur Anzeige" to close the gallery and return to the listing view.
+ * Returns true if the button/link was found and clicked.
+ */
+async function clickBackToListing(page: Page, addLog: (msg: string) => void): Promise<boolean> {
+  const backBtn = page.getByRole("button", { name: /Zurück zur Anzeige/i }).first();
+  const visible = await backBtn.isVisible().catch(() => false);
+  if (visible) {
+    const handle = await backBtn.elementHandle();
+    if (handle) {
+      await humanLikeClick(page, handle);
+      addLog('Clicked "Zurück zur Anzeige".');
+      return true;
+    }
+  }
+  const link = page.getByText(/Zurück zur Anzeige/i).first();
+  const linkVisible = await link.isVisible().catch(() => false);
+  if (linkVisible) {
+    const handle = await link.elementHandle();
+    if (handle) {
+      await humanLikeClick(page, handle);
+      addLog('Clicked "Zurück zur Anzeige" (link).');
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Check if URL looks like a real photo (not icon/logo).
@@ -186,19 +256,34 @@ export async function scrapeListingGallery(
   };
 
   try {
+    const scrapeStartMs = Date.now();
+    let waitingDurationMs: number | undefined;
+    let extractDurationMs: number | undefined;
+    const setWaitingOnce = () => {
+      if (waitingDurationMs === undefined) waitingDurationMs = Date.now() - scrapeStartMs;
+    };
+    const setExtractBeforeReturn = () => {
+      extractDurationMs = Date.now() - scrapeStartMs - (waitingDurationMs ?? 0);
+    };
+
     const cleanUrl = url.split("#")[0];
     addLog(`Navigating to ${cleanUrl}`);
     const response = await page.goto(cleanUrl, { waitUntil: "load", timeout: 45000 });
     addLog(`Navigation finished. HTTP status: ${response ? response.status() : "unknown (no response)"}`);
     if (response && (response.status() === 402 || response.status() === 407)) {
       addLog("Proxy returned no credits (402/407); ScraperAPI credits may be exhausted.");
-      return { imageUrls: [], logs, screenshots, error: SCRAPERAPI_NO_CREDITS_ERROR };
+      return { imageUrls: [], logs, screenshots, error: SCRAPERAPI_NO_CREDITS_ERROR, rooms: undefined, sizeSqm: undefined };
     }
     // Initial human-like pause so content and possible consent popup can appear.
     const afterLoadMs = randomDelay(3000, 6000);
     addLog(`Waiting ${afterLoadMs}ms (human-like pause after load / potential popup)`);
     await sleep(afterLoadMs);
     await captureScreenshot("1. Page loaded");
+
+    const listingDetails = await extractListingDetails(page);
+    if (listingDetails.rooms != null || listingDetails.sizeSqm != null) {
+      addLog(`Listing details: ${listingDetails.rooms != null ? `${listingDetails.rooms} Zimmer` : ""}${listingDetails.rooms != null && listingDetails.sizeSqm != null ? ", " : ""}${listingDetails.sizeSqm != null ? `${listingDetails.sizeSqm} m²` : ""}`);
+    }
 
     let imageUrls: string[];
 
@@ -217,10 +302,24 @@ export async function scrapeListingGallery(
       );
       await sleep(randomDelay(600, 1200));
       await captureScreenshot("2. Gallery already open");
+      setWaitingOnce();
       const urls = await collectOverlayOrGalleryImageUrls(page, addLog);
       if (urls.length > 0) {
         addLog(`Found ${urls.length} candidate image(s) from already-open gallery view`);
-        return { imageUrls: urls, logs, screenshots, error: null };
+        const wentBack = await clickBackToListing(page, addLog);
+        if (wentBack) {
+          await sleep(randomDelay(2000, 4000));
+          const detailsFromListing = await extractListingDetails(page);
+          const rooms = detailsFromListing.rooms ?? listingDetails.rooms;
+          const sizeSqm = detailsFromListing.sizeSqm ?? listingDetails.sizeSqm;
+          if (detailsFromListing.rooms != null || detailsFromListing.sizeSqm != null) {
+            addLog(`Listing details after returning from gallery: ${rooms != null ? `${rooms} Zimmer` : ""}${rooms != null && sizeSqm != null ? ", " : ""}${sizeSqm != null ? `${sizeSqm} m²` : ""}`);
+          }
+          setExtractBeforeReturn();
+          return { imageUrls: urls, logs, screenshots, error: null, rooms, sizeSqm, waitingDurationMs, extractDurationMs };
+        }
+        setExtractBeforeReturn();
+        return { imageUrls: urls, logs, screenshots, error: null, rooms: listingDetails.rooms, sizeSqm: listingDetails.sizeSqm, waitingDurationMs, extractDurationMs };
       }
       addLog("Gallery view appeared open but returned 0 images; falling back to opening gallery explicitly.");
     }
@@ -239,10 +338,24 @@ export async function scrapeListingGallery(
 
       await captureScreenshot("2. Gallery opened via Alle Bilder ansehen");
       addLog("Collecting images from masonry/full gallery view after clicking Alle Bilder ansehen");
+      setWaitingOnce();
       const urls = await collectOverlayOrGalleryImageUrls(page, addLog);
       if (urls.length > 0) {
         addLog(`Found ${urls.length} candidate image(s) from masonry/full gallery view`);
-        return { imageUrls: urls, logs, screenshots, error: null };
+        const wentBack = await clickBackToListing(page, addLog);
+        if (wentBack) {
+          await sleep(randomDelay(2000, 4000));
+          const detailsFromListing = await extractListingDetails(page);
+          const rooms = detailsFromListing.rooms ?? listingDetails.rooms;
+          const sizeSqm = detailsFromListing.sizeSqm ?? listingDetails.sizeSqm;
+          if (detailsFromListing.rooms != null || detailsFromListing.sizeSqm != null) {
+            addLog(`Listing details after returning from gallery: ${rooms != null ? `${rooms} Zimmer` : ""}${rooms != null && sizeSqm != null ? ", " : ""}${sizeSqm != null ? `${sizeSqm} m²` : ""}`);
+          }
+          setExtractBeforeReturn();
+          return { imageUrls: urls, logs, screenshots, error: null, rooms, sizeSqm, waitingDurationMs, extractDurationMs };
+        }
+        setExtractBeforeReturn();
+        return { imageUrls: urls, logs, screenshots, error: null, rooms: listingDetails.rooms, sizeSqm: listingDetails.sizeSqm, waitingDurationMs, extractDurationMs };
       }
       addLog('Clicking "Alle ... Bilder ansehen" did not yield any images; falling back to inline carousel.');
     }
@@ -256,10 +369,12 @@ export async function scrapeListingGallery(
       await captureScreenshot("2. Top carousel detected (fallback)");
       const expected = await detectCarouselTotalInGallery(page, gallerySection);
       if (expected) addLog(`Top carousel total (expected): ${expected}`);
+      setWaitingOnce();
       const carouselUrls = await collectGalleryImageUrls(page, addLog);
       if (carouselUrls.length > 0) {
         addLog(`Found ${carouselUrls.length} candidate image(s) from fallback carousel view`);
-        return { imageUrls: carouselUrls, logs, screenshots, error: null };
+        setExtractBeforeReturn();
+        return { imageUrls: carouselUrls, logs, screenshots, error: null, rooms: listingDetails.rooms, sizeSqm: listingDetails.sizeSqm, waitingDurationMs, extractDurationMs };
       }
     }
 
@@ -270,6 +385,8 @@ export async function scrapeListingGallery(
       screenshots,
       error:
         'Could not extract any apartment photos from this listing. The gallery button/carousel structure may have changed.',
+      rooms: listingDetails.rooms,
+      sizeSqm: listingDetails.sizeSqm,
     };
   } catch (err) {
     try {
@@ -284,6 +401,8 @@ export async function scrapeListingGallery(
       logs,
       screenshots,
       error: `Loading the listing page failed: ${message}. Check the step log and screenshots below for details.`,
+      rooms: undefined,
+      sizeSqm: undefined,
     };
   }
 }
