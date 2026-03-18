@@ -141,6 +141,16 @@ function ListingResultCard({ result, isAdmin }: { result: ListingResult; isAdmin
             >
               Open folder in new tab
             </a>
+            {result.apartmentInfoFileUrl && (
+              <a
+                href={result.apartmentInfoFileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ ...styles.driveFolderButton, background: "#e0e0e0", color: "#1a1a1a" }}
+              >
+                Apartment info (txt)
+              </a>
+            )}
             {(result.generatedFiles?.length ?? 0) > 0 && (
               <button
                 type="button"

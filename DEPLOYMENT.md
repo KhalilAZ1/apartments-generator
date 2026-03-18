@@ -175,6 +175,79 @@ docker compose down            # Stop and remove containers
 
 ---
 
+## Updating the code on the Hostinger VPS
+
+After you change the code locally, update the VPS and restart the app as follows.
+
+### If you deployed with Git (clone)
+
+1. **SSH into the VPS** (or open Terminal in Hostinger).
+2. Go to the project folder and pull the latest code:
+
+```bash
+cd /root/apartments-generator   # or /var/www/apartments-generator
+git pull origin main
+```
+
+(Use your actual branch name if not `main`, e.g. `git pull origin master`.)
+
+3. **Rebuild and restart** the Docker app:
+
+```bash
+docker compose up -d --build
+```
+
+4. **(Optional)** Check that it's running and see logs:
+
+```bash
+docker compose ps
+docker compose logs -f app
+```
+
+Your `.env` and any files you created on the server (e.g. credentials) stay as they are; only code from the repo is updated.
+
+### If you deployed by uploading files (SFTP / File Manager)
+
+1. **Upload the updated files** from your PC to the same folder on the VPS (e.g. overwrite `backend/`, `frontend/`, and root files like `Dockerfile`, `docker-compose.yml`, `package.json`). Do **not** overwrite `.env` on the server with a local one if it has production secrets.
+2. **SSH into the VPS** (or use Terminal in Hostinger), then:
+
+```bash
+cd /root/apartments-generator   # or your project path
+docker compose up -d --build
+```
+
+3. **(Optional)** Check status and logs:
+
+```bash
+docker compose ps
+docker compose logs -f app
+```
+
+**One-liner (Git):**  
+`cd /root/apartments-generator && git pull origin main && docker compose up -d --build`
+
+---
+
+## Troubleshooting
+
+### Apartment info (apartment-info.txt) not visible on VPS
+
+The app uploads a text file (`apartment-info.txt`) with rooms, size, city, zip and approximate rent to the **same Google Drive folder** as the generated images.
+
+- **In the UI:** When the upload succeeds, an **"Apartment info (txt)"** button appears next to "Open folder in new tab". Use it to open the file in Drive. If that button never appears, the upload failed on the server.
+- **In Drive:** You can also open the folder (via "Open folder in new tab") and look for `apartment-info.txt` inside. If the folder and images are there but the txt file is missing, the upload failed.
+
+**If the txt file was missing when running on Hostinger VPS (but works locally):**
+
+- **"Anyone" sharing disabled** – The app uploads the file and then tries to set "anyone with the link" can view. Some Google accounts or organizations block this; the API then returns an error and the app used to treat the whole upload as failed. The code now treats that permission step as non-fatal: the file is still created in the folder and the **"Apartment info (txt)"** link is still returned. So after updating, the txt should appear even when "anyone" sharing is blocked; you can open it from the folder or via the link when logged into the same Google account that owns the Drive.
+- **Drive credentials on the VPS** – Ensure `.env` on the VPS has the same working Drive config (service account path or OAuth client id/secret/refresh token). If the service account JSON is mounted in Docker, the path inside the container must match `GOOGLE_DRIVE_CREDENTIALS_PATH`.
+- **Listing logs** – In the app, expand "Show debug logs" for that listing and look for:
+  - `[Drive] Upload text file error: ...` (actual upload failed) or
+  - `[Drive] Uploaded apartment-info.txt but "anyone" share failed (file still in folder)` (file is there; only public link was blocked).
+- **Retry** – The app retries the txt upload once after 2 seconds if the first attempt fails, which can help with transient network issues on the VPS.
+
+---
+
 ## Notes
 
 - These instructions assume Docker deployment, which is the recommended and supported way to run this app in production.

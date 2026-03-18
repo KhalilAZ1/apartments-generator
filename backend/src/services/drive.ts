@@ -108,13 +108,15 @@ export async function createListingFolder(
       return null;
     }
 
-    await drive.permissions.create({
-      fileId: folderId,
-      requestBody: {
-        role: "reader",
-        type: "anyone",
-      },
-    });
+    try {
+      await drive.permissions.create({
+        fileId: folderId,
+        requestBody: { role: "reader", type: "anyone" },
+      });
+    } catch (permErr) {
+      const msg = permErr instanceof Error ? permErr.message : String(permErr);
+      addLog(`Folder created but "anyone" share failed (file still usable): ${msg}`);
+    }
 
     const folderUrl = `https://drive.google.com/drive/folders/${folderId}`;
     addLog(`Created folder ${name} -> ${folderUrl}`);
@@ -160,10 +162,15 @@ export async function uploadImageToDrive(
       return null;
     }
 
-    await drive.permissions.create({
-      fileId,
-      requestBody: { role: "reader", type: "anyone" },
-    });
+    try {
+      await drive.permissions.create({
+        fileId,
+        requestBody: { role: "reader", type: "anyone" },
+      });
+    } catch (permErr) {
+      const msg = permErr instanceof Error ? permErr.message : String(permErr);
+      addLog(`Uploaded ${filename} but "anyone" share failed (file still in folder): ${msg}`);
+    }
 
     addLog(`Uploaded ${filename} -> ${webViewLink ?? fileId}`);
     return {
@@ -212,10 +219,15 @@ export async function uploadTextFileToDrive(
       return null;
     }
 
-    await drive.permissions.create({
-      fileId,
-      requestBody: { role: "reader", type: "anyone" },
-    });
+    try {
+      await drive.permissions.create({
+        fileId,
+        requestBody: { role: "reader", type: "anyone" },
+      });
+    } catch (permErr) {
+      const msg = permErr instanceof Error ? permErr.message : String(permErr);
+      addLog(`Uploaded ${filename} but "anyone" share failed (file still in folder): ${msg}`);
+    }
 
     addLog(`Uploaded ${filename} -> ${webViewLink ?? fileId}`);
     return {

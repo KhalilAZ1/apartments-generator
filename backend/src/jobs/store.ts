@@ -10,6 +10,8 @@ export interface ListingJobEntry {
   startedAt: string;
   finishedAt?: string;
   folderUrl?: string;
+  /** Direct link to apartment-info.txt in Drive (if upload succeeded). */
+  apartmentInfoFileUrl?: string;
   generatedFiles?: { originalUrl: string; driveFileUrl: string; previewUrl?: string }[];
   imagesFound?: number;
   imagesUsed?: number;

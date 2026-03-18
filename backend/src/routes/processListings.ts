@@ -314,6 +314,7 @@ export async function processSelectedHandler(req: Request, res: Response): Promi
   }
 
   const generatedFiles: { originalUrl: string; driveFileUrl: string; previewUrl?: string }[] = [];
+  let apartmentInfoFileUrl: string | undefined;
   let successCount = 0;
   let listingCostUsd = 0;
   const totalImages = selectedUrls.length;
@@ -427,12 +428,23 @@ export async function processSelectedHandler(req: Request, res: Response): Promi
       `Approximate rent (warm): ~${approximateRentEur} €`,
     ].filter(Boolean);
     const content = lines.join("\n");
-    await uploadTextFileToDrive(
+    let infoFileResult = await uploadTextFileToDrive(
       folderResult.folderId,
       "apartment-info.txt",
       content,
       listingLogs
     );
+    if (!infoFileResult && !isJobCancelled(jobId)) {
+      listingLogs.push(`[${logTs()}] Retrying apartment-info.txt upload...`);
+      await new Promise((r) => setTimeout(r, 2000));
+      infoFileResult = await uploadTextFileToDrive(
+        folderResult.folderId,
+        "apartment-info.txt",
+        content,
+        listingLogs
+      );
+    }
+    apartmentInfoFileUrl = infoFileResult?.webViewLink ?? undefined;
   } catch (infoErr) {
     const msg = infoErr instanceof Error ? infoErr.message : String(infoErr);
     listingLogs.push(`[${logTs()}] Could not create apartment info file: ${msg}`);
@@ -452,6 +464,7 @@ export async function processSelectedHandler(req: Request, res: Response): Promi
         error: finalError ?? null,
         finishedAt: new Date().toISOString(),
         folderUrl: folderResult.folderUrl,
+        apartmentInfoFileUrl,
         generatedFiles,
         imagesFound: listing.imageUrls?.length,
         imagesUsed: selectedUrls.length,

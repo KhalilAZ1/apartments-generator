@@ -67,6 +67,8 @@ export type GeminiModelId = (typeof GEMINI_MODEL_IDS)[number];
 export interface ListingResult {
   url: string;
   folderUrl?: string;
+  /** Direct link to apartment-info.txt in Drive (if upload succeeded). */
+  apartmentInfoFileUrl?: string;
   imagesFound?: number;
   imagesUsed?: number;
   generatedFiles?: { originalUrl: string; driveFileUrl: string; previewUrl?: string }[];
@@ -119,6 +121,7 @@ export interface JobListingEntry {
   startedAt: string;
   finishedAt?: string;
   folderUrl?: string;
+  apartmentInfoFileUrl?: string;
   generatedFiles?: { originalUrl: string; driveFileUrl: string; previewUrl?: string }[];
   imagesFound?: number;
   imagesUsed?: number;
@@ -362,6 +365,7 @@ export function jobListingToResult(entry: JobListingEntry): ListingResult {
   return {
     url: entry.url,
     folderUrl: entry.folderUrl,
+    apartmentInfoFileUrl: entry.apartmentInfoFileUrl,
     imagesFound: entry.imagesFound,
     imagesUsed: entry.imagesUsed,
     generatedFiles: entry.generatedFiles,
