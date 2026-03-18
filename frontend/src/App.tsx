@@ -121,20 +121,6 @@ function ListingResultCard({ result, isAdmin }: { result: ListingResult; isAdmin
           {result.error}
         </p>
       )}
-      {result.apartmentInfo && (
-        <div style={styles.apartmentInfoBlock}>
-          <div style={styles.apartmentInfoTitle}>Apartment information</div>
-          <ul style={styles.apartmentInfoList}>
-            {result.apartmentInfo.rooms != null && (
-              <li>Rooms: {result.apartmentInfo.rooms}</li>
-            )}
-            <li>Size: {result.apartmentInfo.sizeSqm} m²</li>
-            <li>City: {result.apartmentInfo.city}</li>
-            <li>Zip code: {result.apartmentInfo.zipCode}</li>
-            <li>Approximate rent (warm): ~{result.apartmentInfo.approximateRentEur} €</li>
-          </ul>
-        </div>
-      )}
       {result.folderUrl && (
         <div style={styles.driveFolderBlock}>
           <div style={styles.driveFolderHeader}>
@@ -155,16 +141,6 @@ function ListingResultCard({ result, isAdmin }: { result: ListingResult; isAdmin
             >
               Open folder in new tab
             </a>
-            {result.apartmentInfoFileUrl && (
-              <a
-                href={result.apartmentInfoFileUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ ...styles.driveFolderButton, background: "#e0e0e0", color: "#1a1a1a" }}
-              >
-                Apartment info (txt)
-              </a>
-            )}
             {(result.generatedFiles?.length ?? 0) > 0 && (
               <button
                 type="button"
@@ -1817,26 +1793,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 8,
     padding: 16,
     marginBottom: 16,
-  },
-  apartmentInfoBlock: {
-    marginTop: 16,
-    padding: 16,
-    background: "#f5f5f5",
-    borderRadius: 8,
-    border: "1px solid #e0e0e0",
-  },
-  apartmentInfoTitle: {
-    fontSize: 16,
-    fontWeight: 600,
-    color: "#333",
-    marginBottom: 8,
-  },
-  apartmentInfoList: {
-    margin: 0,
-    paddingLeft: 20,
-    fontSize: 15,
-    color: "#444",
-    lineHeight: 1.6,
   },
   driveFolderBlock: {
     marginTop: 16,
