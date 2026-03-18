@@ -96,8 +96,11 @@ export interface ListingForEstimate {
 
 export type EstimatePhase = "scrape" | "process" | "full";
 
+/** Slight overestimation factor so the timer rarely finishes before the job (1.15 = 15% over). */
+const ESTIMATE_BUFFER_FACTOR = 1;
+
 /**
- * Estimate remaining time (ms).
+ * Estimate remaining time (ms). Intentionally slightly overestimated so the countdown does not run out before the job finishes.
  * - full: waiting + (extractPerImage × N) + (processPerImage × N) for whole pipeline.
  * - scrape: only waiting + (extractPerImage × N) for listings not yet scraped (manual step 1).
  * - process: only (processPerImage × N) for process step (manual step 2, or for auto not used alone).
@@ -158,12 +161,12 @@ export function estimateRemainingMs(
       }
     }
   }
-  if (remaining > 0) return remaining;
+  if (remaining > 0) return Math.round(remaining * ESTIMATE_BUFFER_FACTOR);
   if (phase === "process") {
     const hasUnfinished = listings.some((l) => !l.finishedAt && !l.error);
     if (hasUnfinished) {
       const count = imagesToProcessOverride ?? maxImages;
-      return count * avgProcessPerImageMs;
+      return Math.round(count * avgProcessPerImageMs * ESTIMATE_BUFFER_FACTOR);
     }
   }
   return undefined;

@@ -403,13 +403,13 @@ export async function processSelectedHandler(req: Request, res: Response): Promi
     }
   }
 
-  // Build and upload apartment info (rooms, size, city, zip, approximate rent) to the same Drive folder.
+  // Build and upload apartment info (rooms, size, city, zip, approximate rent). Always store in listing for UI; optionally upload txt to Drive.
+  let apartmentInfo: { rooms?: number; sizeSqm: number; city: string; zipCode: string; approximateRentEur: number } | undefined;
   try {
     const rooms = listing.rooms;
     const sizeSqm = listing.sizeSqm ?? 70;
     const { cityName, zipCode, rentPerSqm } = pickRandomCityAndZip();
     const warmFactor = 1.2;
-    // Smaller apartments (fewer rooms) typically have higher €/m²; apply room-based factor.
     const roomFactor =
       rooms == null ? 1
       : rooms <= 1 ? 1.12
@@ -418,6 +418,7 @@ export async function processSelectedHandler(req: Request, res: Response): Promi
       : rooms <= 4 ? 0.97
       : 0.93;
     const approximateRentEur = Math.round(rentPerSqm * sizeSqm * warmFactor * roomFactor);
+    apartmentInfo = { rooms, sizeSqm, city: cityName, zipCode, approximateRentEur };
     const lines: string[] = [
       "Apartment information",
       "-------------------",
@@ -465,6 +466,7 @@ export async function processSelectedHandler(req: Request, res: Response): Promi
         finishedAt: new Date().toISOString(),
         folderUrl: folderResult.folderUrl,
         apartmentInfoFileUrl,
+        apartmentInfo,
         generatedFiles,
         imagesFound: listing.imageUrls?.length,
         imagesUsed: selectedUrls.length,

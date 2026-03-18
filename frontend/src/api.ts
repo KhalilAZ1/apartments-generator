@@ -64,11 +64,20 @@ export const GEMINI_MODEL_IDS = [
 ] as const;
 export type GeminiModelId = (typeof GEMINI_MODEL_IDS)[number];
 
+/** Apartment details (rooms, size, city, zip, approximate rent) — shown in UI and optionally in Drive as txt. */
+export interface ApartmentInfo {
+  rooms?: number;
+  sizeSqm: number;
+  city: string;
+  zipCode: string;
+  approximateRentEur: number;
+}
+
 export interface ListingResult {
   url: string;
   folderUrl?: string;
-  /** Direct link to apartment-info.txt in Drive (if upload succeeded). */
   apartmentInfoFileUrl?: string;
+  apartmentInfo?: ApartmentInfo;
   imagesFound?: number;
   imagesUsed?: number;
   generatedFiles?: { originalUrl: string; driveFileUrl: string; previewUrl?: string }[];
@@ -122,6 +131,7 @@ export interface JobListingEntry {
   finishedAt?: string;
   folderUrl?: string;
   apartmentInfoFileUrl?: string;
+  apartmentInfo?: ApartmentInfo;
   generatedFiles?: { originalUrl: string; driveFileUrl: string; previewUrl?: string }[];
   imagesFound?: number;
   imagesUsed?: number;
@@ -366,6 +376,7 @@ export function jobListingToResult(entry: JobListingEntry): ListingResult {
     url: entry.url,
     folderUrl: entry.folderUrl,
     apartmentInfoFileUrl: entry.apartmentInfoFileUrl,
+    apartmentInfo: entry.apartmentInfo,
     imagesFound: entry.imagesFound,
     imagesUsed: entry.imagesUsed,
     generatedFiles: entry.generatedFiles,

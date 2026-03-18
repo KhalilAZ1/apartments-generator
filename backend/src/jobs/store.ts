@@ -12,6 +12,8 @@ export interface ListingJobEntry {
   folderUrl?: string;
   /** Direct link to apartment-info.txt in Drive (if upload succeeded). */
   apartmentInfoFileUrl?: string;
+  /** Apartment details shown in UI (and optionally uploaded as txt to Drive). */
+  apartmentInfo?: { rooms?: number; sizeSqm: number; city: string; zipCode: string; approximateRentEur: number };
   generatedFiles?: { originalUrl: string; driveFileUrl: string; previewUrl?: string }[];
   imagesFound?: number;
   imagesUsed?: number;

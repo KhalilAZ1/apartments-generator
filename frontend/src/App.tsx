@@ -121,6 +121,20 @@ function ListingResultCard({ result, isAdmin }: { result: ListingResult; isAdmin
           {result.error}
         </p>
       )}
+      {result.apartmentInfo && (
+        <div style={styles.apartmentInfoBlock}>
+          <div style={styles.apartmentInfoTitle}>Apartment information</div>
+          <ul style={styles.apartmentInfoList}>
+            {result.apartmentInfo.rooms != null && (
+              <li>Rooms: {result.apartmentInfo.rooms}</li>
+            )}
+            <li>Size: {result.apartmentInfo.sizeSqm} m²</li>
+            <li>City: {result.apartmentInfo.city}</li>
+            <li>Zip code: {result.apartmentInfo.zipCode}</li>
+            <li>Approximate rent (warm): ~{result.apartmentInfo.approximateRentEur} €</li>
+          </ul>
+        </div>
+      )}
       {result.folderUrl && (
         <div style={styles.driveFolderBlock}>
           <div style={styles.driveFolderHeader}>
@@ -493,6 +507,7 @@ function MainScreen() {
   const countdownValueRef = useRef(0);
   const inSelectionPhaseRef = useRef(false);
   const countdownBaseExistsRef = useRef(false);
+  const prevInSelectionPhaseRef = useRef(false);
 
   const setJobStatusWithCountdown = useCallback((next: JobStatus | null) => {
     if (next) {
@@ -664,14 +679,17 @@ function MainScreen() {
         setFrozenCountdownMs(null);
       }
     } else {
-      if (inSelectionPhase) {
+      const inSelection = Boolean(inSelectionPhase);
+      const justEnteredSelectionPhase = inSelection && !prevInSelectionPhaseRef.current;
+      if (justEnteredSelectionPhase) {
         setCountdownBase(null);
         countdownBaseExistsRef.current = false;
         setFrozenCountdownMs(null);
-      } else {
+      } else if (!inSelection) {
         setFrozenCountdownMs(null);
       }
     }
+    prevInSelectionPhaseRef.current = Boolean(inSelectionPhase);
   }, [inSelectionPhase, useAutoSelect]);
 
   const countdownMs = useAutoSelect && inSelectionPhase && frozenCountdownMs != null ? frozenCountdownMs : liveCountdownMs;
@@ -688,7 +706,8 @@ function MainScreen() {
   const hasEstimate =
     countdownBase != null || (jobStatus?.estimatedRemainingMs != null && jobStatus.estimatedRemainingMs > 0);
   const showTimer =
-    hasEstimate && (useAutoSelect || !inSelectionPhase);
+    hasEstimate &&
+    (useAutoSelect || !inSelectionPhase || anyListingInProcess || (!useAutoSelect && countdownBase != null));
   const showTimerInResults = hasEstimate;
   const countdownDisplay = (
     <span
@@ -1328,7 +1347,7 @@ function MainScreen() {
                       listing={listing}
                       maxImages={maxImagesToSelect}
                       onProcessStart={() => {
-                        const optimisticMs = Math.max(30000, maxImagesToSelect * 12 * 1000);
+                        const optimisticMs = Math.max(30000, maxImagesToSelect * 14 * 1000);
                         setCountdownBase({ ms: optimisticMs, at: Date.now() });
                         countdownBaseExistsRef.current = true;
                         getJobStatus(jobStatus!.id, {
@@ -1356,7 +1375,7 @@ function MainScreen() {
                       listing={listing}
                       maxImages={maxImagesToSelect}
                       onProcessStart={(selectedCount) => {
-                        const optimisticMs = Math.max(30000, selectedCount * 12 * 1000);
+                        const optimisticMs = Math.max(30000, selectedCount * 14 * 1000);
                         setCountdownBase({ ms: optimisticMs, at: Date.now() });
                         countdownBaseExistsRef.current = true;
                         getJobStatus(jobStatus!.id, {
@@ -1798,6 +1817,26 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 8,
     padding: 16,
     marginBottom: 16,
+  },
+  apartmentInfoBlock: {
+    marginTop: 16,
+    padding: 16,
+    background: "#f5f5f5",
+    borderRadius: 8,
+    border: "1px solid #e0e0e0",
+  },
+  apartmentInfoTitle: {
+    fontSize: 16,
+    fontWeight: 600,
+    color: "#333",
+    marginBottom: 8,
+  },
+  apartmentInfoList: {
+    margin: 0,
+    paddingLeft: 20,
+    fontSize: 15,
+    color: "#444",
+    lineHeight: 1.6,
   },
   driveFolderBlock: {
     marginTop: 16,
